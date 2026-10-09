@@ -140,7 +140,7 @@ pub fn geometry(width: f64, height: f64, rotation: i32, o: &RenderOptions) -> Ge
 
 unsafe extern "C" fn past_deadline(p: *mut IFSDK_PAUSE) -> c_int {
     let deadline = &*((*p).user as *const Instant);
-    (Instant::now() > *deadline) as c_int
+    (Instant::now() >= *deadline) as c_int
 }
 
 /// Render a loaded page into `buf` (packed rows, `geometry().len()` bytes): RGB, RGBA or gray.
@@ -209,7 +209,7 @@ pub unsafe fn render_loaded_page(
                 bm, page, -g.px0, -g.py0, g.full_w, g.full_h, g.rotate, flags, &mut pause,
             );
             while st == FPDF_RENDER_TOBECONTINUED {
-                if Instant::now() > deadline {
+                if Instant::now() >= deadline {
                     res = Err(format!("rendering took longer than {t:?}"));
                     break;
                 }

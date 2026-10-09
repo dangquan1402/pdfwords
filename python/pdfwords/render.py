@@ -179,11 +179,11 @@ def _render_page(raw_page, formenv, g, ch, addr, flags, argb, timeout):
         else:
             deadline = time.monotonic() + float(timeout)
             pause = R.IFSDK_PAUSE(version=1)
-            cb = type(pause.NeedToPauseNow)(lambda _p: int(time.monotonic() > deadline))
+            cb = type(pause.NeedToPauseNow)(lambda _p: int(time.monotonic() >= deadline))
             pause.NeedToPauseNow = cb
             st = R.FPDF_RenderPageBitmap_Start(bm, raw_page, *args, _ct.byref(pause))
             while st == R.FPDF_RENDER_TOBECONTINUED:
-                if time.monotonic() > deadline:
+                if time.monotonic() >= deadline:
                     R.FPDF_RenderPage_Close(raw_page)
                     raise RenderTimeout(f"rendering took longer than {timeout} s")
                 st = R.FPDF_RenderPage_Continue(raw_page, _ct.byref(pause))
