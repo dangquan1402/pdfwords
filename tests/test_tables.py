@@ -86,3 +86,9 @@ def test_real_documents():
     res = pdfwords.open(pdf_path("arxiv_resnet.pdf"))[5].find_tables()
     assert [(t.row_count, t.col_count) for t in res] == [(11, 3), (11, 3), (7, 2)]
     assert res[2].extract()[-1] == ["ResNet (ILSVRC’15)", "3.57"]
+
+
+def test_markdown_skips_boxed_titles():
+    # the W-9 header box is a ruled grid, but its large title text makes it a heading, not a table
+    md = pdfwords.to_markdown(pdf_path("irs_w9.pdf"), pages=[0])
+    assert md.lstrip().startswith("# Form W-9")

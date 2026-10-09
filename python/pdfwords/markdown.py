@@ -403,12 +403,44 @@ def _page_tables(page, tagged, rotated):
         out = tagged_tables(page, rotated)
     if not out and hasattr(page, "find_tables"):
         try:
-            for t in page.find_tables(rotated=rotated):
+            tabs = page.find_tables(rotated=rotated)
+            if tabs:
+                spans = _sized_spans(page, rotated)
+            for t in tabs:
+                if _has_heading_text(t.bbox, spans):
+                    continue        # a boxed title area (form headers), not a data table
                 out.append({"type": "table", "bbox": tuple(t.bbox), "page": page.number, "rows": t.extract(),
                             "md": t.to_markdown(), "text": t.to_text()})
         except Exception:   # detection is best effort
             out = []
     return out
+
+
+def _sized_spans(page, rotated):
+    """(bbox, size, chars) of the page's text spans plus the body font size (most chars)."""
+    spans, hist = [], {}
+    for b in page.get_text("dict", rotated=rotated)["blocks"]:
+        for ln in b.get("lines", ()):
+            for s in ln["spans"]:
+                n = len(s["text"].strip())
+                if n:
+                    sz = round(s["size"], 1)
+                    spans.append((s["bbox"], sz, n))
+                    hist[sz] = hist.get(sz, 0) + n
+    body = max(hist, key=hist.get) if hist else 0
+    return spans, body
+
+
+def _has_heading_text(bbox, spans):
+    """True when the region holds text set clearly larger than the body text (a title)."""
+    spans, body = spans
+    if not body:
+        return False
+    x0, y0, x1, y1 = bbox
+    for (a0, a1, a2, a3), sz, n in spans:
+        if n >= 3 and sz > 1.4 * body and a0 >= x0 - 1 and a2 <= x1 + 1 and a1 >= y0 - 1 and a3 <= y1 + 1:
+            return True
+    return False
 
 
 def table_markdown(rows, header=True):
