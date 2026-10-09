@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 import re
-from ctypes import c_double, c_float, c_uint, c_ulong, create_string_buffer, byref
+from ctypes import c_double, c_float, c_uint, create_string_buffer, byref
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as R

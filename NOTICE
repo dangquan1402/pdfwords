@@ -13,6 +13,11 @@ this repository and are distributed under their own licences:
   * pypdfium2 - https://github.com/pypdfium2-team/pypdfium2
     Copyright geisserml and contributors. Apache-2.0 OR BSD-3-Clause.
 
+Optional editing support (the "edit" extra) uses, when installed:
+  * pypdf - https://github.com/py-pdf/pypdf - BSD 3-Clause.
+  * fontTools - https://github.com/fonttools/fonttools - MIT.
+  * Pillow - https://github.com/python-pillow/Pillow - MIT-CMU (HPND).
+
 The Rust crates depend on libloading (ISC), regex (MIT/Apache-2.0), unicode-bidi
 (MIT/Apache-2.0), unicode-general-category (Apache-2.0) and PyO3 (MIT/Apache-2.0).
 

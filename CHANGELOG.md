@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - unreleased
+
+### Added
+- **Editing** (optional extra `pdfwords[edit]`: pypdf, fontTools, Pillow; all permissive):
+  - Content access: `Page.read_contents()`, `Page.get_contents()`, `Page.set_contents()`,
+    `Document.xref_object()`, `xref_stream()`, `xref_stream_raw()`, `update_stream()` and
+    `xref_length()`.
+  - True redaction: `Page.add_redact_annot()` and
+    `Page.apply_redactions(images=, graphics=, text=)`, with the PyMuPDF constant names.
+    - Glyph-level removal from `Tj`/`TJ`/`'`/`"` that keeps the remaining positions exact.
+    - Copy-on-write Form XObjects.
+    - Image pixel blanking or removal, and vector-art removal.
+    - Removal of overlapping annotations/fields, `ActualText` and XFA.
+    - PDFium-based verification (`RedactionError` / `RedactionWarning`,
+      `page.redaction_report`).
+  - `Document.scrub()` (metadata, XMP, JavaScript, attachments, thumbnails, XFA),
+    `Document.metadata` and `set_metadata()`.
+  - Text insertion: `Page.insert_text()` and `Page.insert_textbox()` (wrap, align
+    left/center/right/justify, overflow return value as in PyMuPDF).
+    - Supports base-14 fonts, embedded and subset TrueType/OpenType fonts (`fontfile=`) with
+      Unicode, including Vietnamese, plus colour and `rotate`.
+  - `Document.save(garbage=, deflate=, incremental=)` and `tobytes()`. Incremental save is
+    refused after redaction.
+- `Page.search_for(text | regex, quads=)`.
+- CLI subcommands: `pdfwords redact`, `pdfwords insert-text` and `pdfwords contents`.
+
 ## [0.1.0] - 2026-10-09
 
 ### Added

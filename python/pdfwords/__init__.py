@@ -27,7 +27,15 @@ from .layout import build_blocks, make_spans, LayoutParams, DEFAULT_PARAMS  # no
 from .order import sort_simple, sort_xycut
 
 __version__ = "0.1.0"
-__all__ = ["open", "Document", "Page", "available_backends", "default_backend", "parallel_words", "__version__"]
+__all__ = ["open", "Document", "Page", "available_backends", "default_backend", "parallel_words", "__version__",
+           "PDF_REDACT_IMAGE_NONE", "PDF_REDACT_IMAGE_REMOVE", "PDF_REDACT_IMAGE_PIXELS",
+           "PDF_REDACT_LINE_ART_NONE", "PDF_REDACT_LINE_ART_REMOVE_IF_COVERED", "PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED",
+           "PDF_REDACT_TEXT_REMOVE", "PDF_REDACT_TEXT_NONE"]
+
+# redaction options (same names and values as PyMuPDF's constants)
+PDF_REDACT_IMAGE_NONE, PDF_REDACT_IMAGE_REMOVE, PDF_REDACT_IMAGE_PIXELS = 0, 1, 2
+PDF_REDACT_LINE_ART_NONE, PDF_REDACT_LINE_ART_REMOVE_IF_COVERED, PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED = 0, 1, 2
+PDF_REDACT_TEXT_REMOVE, PDF_REDACT_TEXT_NONE = 0, 1
 
 LIGATURES = {"\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl", "\ufb03": "ffi", "\ufb04": "ffl", "\ufb05": "st", "\ufb06": "st"}
 _WS = set(" \t\n\r\u00a0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000")
@@ -83,13 +91,110 @@ class Document:
             raise ValueError(f"unknown backend {self.backend!r}")
         if self.backend == "rust":
             _rust()
+        self._source, self._password = source, password
+        self.name = _os.fspath(source) if isinstance(source, (str, _os.PathLike)) else ""
         self._pdf = pdfium.PdfDocument(source, password=password)
+        self._ed = None        # pypdf-based editor, created on first edit / raw access
+        self._dirty = False    # editor has changes PDFium has not seen yet
+        self._gen = 0          # bumped whenever PDFium re-opens the edited bytes
+        self._buf = None
+
+    # ------------------------------------------------------------------ editing plumbing
+    def _editor(self):
+        if self._ed is None:
+            from .edit import _editor_cls
+            src = self._source
+            if isinstance(src, (str, _os.PathLike)):
+                with _open_file(src, "rb") as f:
+                    data = f.read()
+            elif isinstance(src, (bytes, bytearray, memoryview)):
+                data = bytes(src)
+            elif hasattr(src, "read"):
+                if hasattr(src, "seek"):
+                    src.seek(0)
+                data = src.read()
+            else:
+                raise TypeError("editing needs a path, bytes or a file object as source")
+            self._ed = _editor_cls()(data, self._password)
+        return self._ed
+
+    def _touch(self):
+        self._dirty = True
+
+    def _sync(self):
+        """Re-open the edited document in PDFium so extraction sees the changes."""
+        if self._dirty:
+            data = self._ed.to_bytes()
+            old = self._pdf
+            self._pdf = pdfium.PdfDocument(data)
+            self._buf = data
+            old.close()
+            self._gen += 1
+            self._dirty = False
+
+    @property
+    def is_dirty(self):
+        """True when the document has unsaved edits."""
+        return self._ed is not None and (self._dirty or self._gen > 0)
+
+    def save(self, filename, garbage=0, deflate=False, incremental=False, **_ignored):
+        """Write the (edited) document. garbage>=1 drops unreferenced objects (always done after
+        redactions/scrub), garbage>=3 also merges duplicates; deflate compresses uncompressed
+        streams; incremental=True appends changes to the original bytes (refused after redaction,
+        because the removed content would still be in the file)."""
+        data = self.tobytes(garbage=garbage, deflate=deflate, incremental=incremental)
+        if hasattr(filename, "write"):
+            filename.write(data)
+        else:
+            with _open_file(filename, "wb") as f:
+                f.write(data)
+
+    def tobytes(self, garbage=0, deflate=False, incremental=False, **_ignored):
+        return self._editor().to_bytes(incremental=incremental, garbage=garbage, deflate=deflate)
+
+    write = tobytes
+
+    def scrub(self, metadata=True, xml_metadata=True, javascript=True, embedded_files=True,
+              thumbnails=True, xfa=True, **kw):
+        """Remove document-level data that can leak information (Info dict, XMP, JavaScript,
+        embedded/attached files, thumbnails, XFA form packets). Saved files are fully rewritten."""
+        self._editor().scrub(metadata=metadata, xml_metadata=xml_metadata, javascript=javascript,
+                             embedded_files=embedded_files, thumbnails=thumbnails, xfa=xfa, **kw)
+        self._touch()
+
+    @property
+    def metadata(self):
+        self._sync()
+        md = self._pdf.get_metadata_dict(skip_empty=False)
+        return {k[:1].lower() + k[1:]: v for k, v in md.items()}
+
+    def set_metadata(self, md):
+        self._editor().set_metadata(md)
+        self._touch()
+
+    # raw object access (xref numbers refer to the current, possibly edited, document)
+    def xref_length(self):
+        return self._editor().xref_length()
+
+    def xref_object(self, xref, compressed=False):
+        return self._editor().xref_object(xref, compressed)
+
+    def xref_stream(self, xref):
+        return self._editor().xref_stream(xref)
+
+    def xref_stream_raw(self, xref):
+        return self._editor().xref_stream_raw(xref)
+
+    def update_stream(self, xref, data):
+        self._editor().update_stream(xref, data)
+        self._touch()
 
     @property
     def _addr(self):
         return _ct.cast(self._pdf.raw, _ct.c_void_p).value
 
     def __len__(self):
+        self._sync()
         return len(self._pdf)
 
     page_count = property(__len__)
@@ -122,21 +227,34 @@ class Page:
         self._pg = None
         self._cache = {}
         self._geom = None
+        self._gen = doc._gen
+        self.redaction_report = None
+
+    def _fresh(self):
+        """Drop cached PDFium state when the document was edited since it was loaded."""
+        d = self.parent
+        if d._dirty:
+            d._sync()
+        if self._gen != d._gen:
+            self._pg, self._cache, self._geom, self._gen = None, {}, None, d._gen
 
     # pypdfium2 page (python backend), loaded lazily
     @property
     def _page(self):
+        self._fresh()
         if self._pg is None:
             self._pg = self.parent._pdf[self.number]
         return self._pg
 
     def _rs(self, ligatures=False):
+        self._fresh()
         key = ("rs", ligatures)
         if key not in self._cache:
             self._cache[key] = _rust().load_page(self.parent._addr, self.number, ligatures)
         return self._cache[key]
 
     def _geometry(self):
+        self._fresh()
         if self._geom is None:
             if self._rust:
                 rp = self._rs(False)
@@ -175,6 +293,7 @@ class Page:
 
     # ------------------------------------------------------------------ core
     def _glyphs(self, ligatures):
+        self._fresh()
         key = ("g", ligatures)
         if key not in self._cache:
             tp = self._page.get_textpage()
@@ -245,6 +364,114 @@ class Page:
         if option == "text":
             return "".join(self._block_text(b, lig, dehyphenate) for b in blocks)
         raise ValueError(f"unsupported option {option!r}")
+
+    # ------------------------------------------------------------------ search
+    def search_for(self, needle, *, quads=False, clip=None, regex=False, ignore_case=True, rotated=False):
+        """Rectangles (x0, y0, x1, y1) of every occurrence of `needle` (plain text, or a regular
+        expression with regex=True), one rectangle per line an occurrence spans. Matching is
+        case-insensitive by default and treats any run of whitespace / line breaks as one space.
+        quads=True returns 4-point tuples (ul, ur, ll, lr) instead."""
+        return _search(self, needle, quads=quads, clip=clip, regex=regex, ignore_case=ignore_case, rotated=rotated)
+
+    # ------------------------------------------------------------------ editing (pdfwords[edit])
+    def read_contents(self):
+        """Decoded page content: all /Contents streams concatenated (bytes)."""
+        return self.parent._editor().read_contents(self.number)
+
+    def get_contents(self):
+        """xref numbers of the page's content streams."""
+        return self.parent._editor().get_contents(self.number)
+
+    def set_contents(self, data):
+        """Replace the page content with one new stream; returns its xref."""
+        x = self.parent._editor().set_contents(self.number, bytes(data))
+        self.parent._touch()
+        return x
+
+    def add_redact_annot(self, quad, text=None, fontname="Helv", fontsize=11, align=0, fill=(1, 1, 1),
+                         text_color=(0, 0, 0), cross_out=True):
+        """Mark an area for redaction (a /Redact annotation). quad: (x0, y0, x1, y1) in page
+        coordinates (as returned by get_text / search_for, unrotated page). Nothing is removed
+        until apply_redactions(). fill: RGB 0..1 of the box drawn afterwards (None: no box);
+        text: optional overlay text drawn in the box."""
+        q = tuple(map(float, quad[:4])) if len(quad) >= 4 and not hasattr(quad[0], "__len__") else _quad_rect(quad)
+        a = self.parent._editor().add_redact_annot(self.number, q, text=text, fontname=fontname, fontsize=fontsize,
+                                                   align=align, fill=fill, text_color=text_color, cross_out=cross_out)
+        self.parent._touch()
+        return a
+
+    def apply_redactions(self, images=PDF_REDACT_IMAGE_PIXELS, graphics=PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
+                         text=PDF_REDACT_TEXT_REMOVE, *, annotations=True, min_overlap=0.1, verify=True, strict=True):
+        """Apply this page's redaction annotations: remove the text, image pixels/images and vector
+        art under them from the page content (incl. Form XObjects), delete annotations/form fields
+        that overlap them, then draw the fill boxes and overlay texts.
+
+        verify=True re-extracts the page with PDFium afterwards: any character still mostly
+        inside a redaction area raises RedactionError (strict=True) / warns (strict=False), and
+        characters outside the areas that moved or disappeared trigger a RedactionWarning.
+        The result is stored in page.redaction_report. Returns True if anything was applied."""
+        import warnings
+        from .edit import RedactionError, RedactionWarning
+        ed = self.parent._editor()
+        if not ed.redact_annots(self.number):
+            return False
+        before = _page_chars(self) if verify else None
+        ok, stats, urects, specs = ed.apply_redactions(self.number, images=images, graphics=graphics, text=text,
+                                                annotations=annotations, min_overlap=min_overlap)
+        self.parent._touch()
+        rects = [ed.rect_from_user(self.number, r) for r in urects]
+        report = dict(stats, rects=rects)
+        if verify:
+            after = _page_chars(self)
+            left = [(c, bb) for c, bb in after if any(_covered_frac(bb, r) >= 0.5 for r in rects)]
+            outside = [(c, bb) for c, bb in before if not any(_overlap(bb, r) for r in rects)]
+            moved = _unmatched(outside, after)
+            report.update(leftover_chars=left, collateral_chars=moved)
+            self.redaction_report = report
+            if left:
+                msg = (f"page {self.number}: {len(left)} characters are still extractable inside the redaction "
+                       f"area(s): {''.join(c for c, _ in left)[:80]!r}")
+                if strict:
+                    ed.draw_redaction_overlays(self.number, specs)
+                    self.parent._touch()
+                    raise RedactionError(msg)
+                warnings.warn(msg, RedactionWarning, stacklevel=2)
+            if moved:
+                warnings.warn(f"page {self.number}: {len(moved)} characters outside the redaction areas moved or "
+                              f"disappeared: {''.join(c for c, _ in moved)[:80]!r}", RedactionWarning, stacklevel=2)
+        else:
+            self.redaction_report = report
+        ed.draw_redaction_overlays(self.number, specs)
+        self.parent._touch()
+        return ok
+
+    def insert_text(self, point, text, fontsize=11, fontname="helv", fontfile=None, color=(0, 0, 0), rotate=0,
+                    lineheight=None, render_mode=0):
+        """Write `text` starting at `point` (baseline start of the first line, page coordinates,
+        unrotated page). "\n" starts a new line. fontname: base-14 short code (helv, tiro, cour,
+        hebo, ...) or fontfile=path to a TrueType/OpenType font (embedded and subset, full
+        Unicode). rotate: 0/90/180/270 (counter-clockwise). Returns the number of lines."""
+        if isinstance(text, (list, tuple)):
+            text = "\n".join(text)
+        n = self.parent._editor().insert_text(self.number, tuple(map(float, point[:2])), text, fontsize=fontsize,
+                                              fontname=fontname, fontfile=fontfile, color=color, rotate=rotate,
+                                              lineheight=lineheight, render_mode=render_mode)
+        self.parent._touch()
+        return n
+
+    def insert_textbox(self, rect, text, fontsize=11, fontname="helv", fontfile=None, color=(0, 0, 0), align=0,
+                       rotate=0, lineheight=None, render_mode=0):
+        """Fill `rect` with word-wrapped `text`. align: 0 left, 1 center, 2 right, 3 justify.
+        Returns the unused height (>= 0); a negative value means the text does not fit and
+        nothing was written (its magnitude is the missing height), as in PyMuPDF."""
+        if isinstance(text, (list, tuple)):
+            text = "\n".join(text)
+        rc = self.parent._editor().insert_textbox(self.number, tuple(map(float, rect[:4])), text, fontsize=fontsize,
+                                                  fontname=fontname, fontfile=fontfile, color=color, align=align,
+                                                  rotate=rotate, lineheight=lineheight, render_mode=render_mode)
+        if rc >= 0:
+            self.parent._touch()
+        return rc
 
     # ------------------------------------------------------------------ formatters
     @staticmethod
@@ -317,6 +544,119 @@ class Page:
                 lines.append({"spans": spans, "wmode": ln.wmode, "dir": d, "bbox": rc(ln.bbox)})
             res["blocks"].append({"type": 0, "number": b.number, "flags": 0, "bbox": rc(b.bbox), "lines": lines})
         return res
+
+
+# ---------------------------------------------------------------------- helpers
+import builtins as _builtins  # noqa: E402
+
+_open_file = _builtins.open  # pdfwords.open shadows the builtin in this module
+
+
+def _quad_rect(q):
+    pts = [tuple(p) for p in q]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _overlap(a, b):
+    """Boxes intersect (a zero-width/height box counts when it lies within the other's span)."""
+    for lo, hi, rlo, rhi in ((a[0], a[2], b[0], b[2]), (a[1], a[3], b[1], b[3])):
+        if hi - lo <= 1e-6:
+            if not rlo <= lo <= rhi:
+                return False
+        elif min(hi, rhi) - max(lo, rlo) <= 1e-6:
+            return False
+    return True
+
+
+def _covered_frac(a, r):
+    """min over axes of the fraction of box `a` covered by `r` (degenerate axes count as covered
+    when inside)."""
+    fr = []
+    for lo, hi, rlo, rhi in ((a[0], a[2], r[0], r[2]), (a[1], a[3], r[1], r[3])):
+        ext = hi - lo
+        inter = min(hi, rhi) - max(lo, rlo)
+        if ext <= 1e-9:
+            fr.append(1.0 if rlo <= lo <= rhi else 0.0)
+        else:
+            fr.append(max(0.0, inter) / ext)
+    return min(fr)
+
+
+def _page_chars(page):
+    out = []
+    d = page.get_text("rawdict", clip=False)
+    for b in d["blocks"]:
+        for ln in b["lines"]:
+            for sp in ln["spans"]:
+                for ch in sp["chars"]:
+                    if ch["c"].strip():
+                        out.append((ch["c"], tuple(ch["bbox"])))
+    return out
+
+
+def _unmatched(chars, pool, tol=0.05):
+    by = {}
+    for c, bb in pool:
+        by.setdefault(c, []).append(bb)
+    bad = []
+    for c, bb in chars:
+        cands = by.get(c, [])
+        for k, ob in enumerate(cands):
+            if all(abs(u - v) <= tol for u, v in zip(bb, ob)):
+                cands.pop(k)
+                break
+        else:
+            bad.append((c, bb))
+    return bad
+
+
+def _search(page, needle, quads=False, clip=None, regex=False, ignore_case=True, rotated=False):
+    import re
+    d = page.get_text("rawdict", clip=clip if clip is not None else True, rotated=rotated)
+    text = []
+    boxes = []   # parallel to text: (line_key, bbox) or None for separators
+    for bi, b in enumerate(d["blocks"]):
+        for li, ln in enumerate(b["lines"]):
+            if text and text[-1] != " ":
+                text.append(" ")
+                boxes.append(None)
+            for sp in ln["spans"]:
+                for ch in sp["chars"]:
+                    c = ch["c"]
+                    if not c.strip():
+                        if text and text[-1] == " ":
+                            continue
+                        c = " "
+                    text.append(c)
+                    boxes.append(((bi, li), ch["bbox"]) if c != " " else None)
+    s = "".join(text)
+    if regex:
+        pat = needle
+    else:
+        pat = r"\s+".join(re.escape(w) for w in needle.split())
+    if not pat:
+        return []
+    rx = re.compile(pat, re.IGNORECASE if ignore_case else 0)
+    out = []
+    for m in rx.finditer(s):
+        groups = {}
+        order = []
+        for k in range(m.start(), m.end()):
+            bx = boxes[k]
+            if bx is None:
+                continue
+            key, bb = bx
+            if key not in groups:
+                groups[key] = list(bb)
+                order.append(key)
+            else:
+                g = groups[key]
+                g[0], g[1], g[2], g[3] = min(g[0], bb[0]), min(g[1], bb[1]), max(g[2], bb[2]), max(g[3], bb[3])
+        for key in order:
+            x0, y0, x1, y1 = groups[key]
+            out.append(((x0, y0), (x1, y0), (x0, y1), (x1, y1)) if quads else (x0, y0, x1, y1))
+    return out
 
 
 # ---------------------------------------------------------------------- parallelism

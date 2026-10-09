@@ -38,6 +38,9 @@ PYTHONPATH=python python -c "import pdfwords; print(pdfwords.available_backends(
 ```
 
 The only runtime dependency is `pypdfium2`. `numpy` is optional, for `Page.words_array()`.
+Editing (content streams, redaction, text insertion) needs the `edit` extra:
+`pip install "pdfwords[edit]"`. It adds pypdf (BSD-3-Clause), fontTools (MIT) and
+Pillow (MIT-CMU).
 
 ## Quick start
 
@@ -77,12 +80,63 @@ on the page as displayed. `page.rect` and `page.rotation` behave like PyMuPDF's.
 **Span flags.** These use the PyMuPDF bit values: superscript 1, italic 2, serif 4,
 monospaced 8, bold 16.
 
+## Editing: page content, redaction, text insertion
+
+These are PyMuPDF-style methods (`pip install "pdfwords[edit]"`). They use the same
+coordinates as `get_text()`: top-left origin, unrotated page.
+
+```python
+doc = pdfwords.open("in.pdf")
+page = doc[0]
+
+page.read_contents()            # b"q 1 0 0 1 ... BT /F1 12 Tf ... ET Q"  (all content streams, decoded)
+page.get_contents()             # [12, 13]  xrefs of the content streams
+doc.xref_object(12)             # "<< /Length 1234 /Filter /FlateDecode >>"
+doc.xref_stream(12)             # decoded stream bytes; also xref_stream_raw / update_stream / xref_length
+
+# search + true redaction
+for rect in page.search_for("Jane Doe"):          # also regex=True, quads=True
+    page.add_redact_annot(rect, text="REDACTED", fill=(0, 0, 0), text_color=(1, 1, 1))
+page.apply_redactions()         # images=PDF_REDACT_IMAGE_PIXELS, graphics=PDF_REDACT_LINE_ART_REMOVE_IF_COVERED
+page.redaction_report           # {"glyphs_removed": 8, "images_blanked": 0, ..., "leftover_chars": [], "collateral_chars": []}
+doc.scrub()                     # metadata, XMP, JavaScript, attachments, thumbnails, XFA
+
+# text insertion
+page.insert_text((72, 72), "Hello\nWorld", fontsize=12, fontname="helv", color=(1, 0, 0), rotate=0)
+page.insert_text((72, 120), "Tiếng Việt có dấu", fontfile="DejaVuSans.ttf")   # embedded + subset, Unicode
+rc = page.insert_textbox((72, 150, 300, 250), long_text, fontsize=10, align=3)  # 0 left 1 center 2 right 3 justify
+# rc >= 0: unused height;  rc < 0: did not fit, nothing written (as in PyMuPDF)
+
+doc.save("out.pdf", garbage=3, deflate=True)       # incremental=True allowed unless redacted/scrubbed
+```
+
+**Redaction removes content. It does not just paint over it.** `apply_redactions()` rewrites
+the page's content streams. Every glyph under a redaction rectangle is deleted from its
+`Tj`/`TJ` string and replaced by the equivalent `TJ` displacement, so the remaining glyphs
+keep their exact positions. Form XObjects that are hit are copied and rewritten, so shared
+forms on other pages stay intact. Image pixels under the area are overwritten, or the image
+is removed. Vector art inside the area is removed, and so are annotations and form fields
+that overlap it. `/ActualText` around removed glyphs and the document's XFA packets are
+dropped. After rewriting, the page is re-extracted with PDFium:
+
+* any character still mostly inside an area raises `RedactionError`;
+* any character outside the areas that moved or vanished raises a `RedactionWarning`.
+
+Saving always rewrites the file and garbage-collects the old streams. See
+[docs/EDITING.md](docs/EDITING.md) for the method, guarantees and limits.
+
 ## CLI
 
 ```bash
 pdfwords file.pdf --mode words --sort xycut --pages 0,2-4 -o words.json
 pdfwords file.pdf --mode text
 pdfwords file.pdf --mode rawdict --rotated --backend python
+
+pdfwords redact in.pdf -o out.pdf --search "Jane Doe" --search "555-0100" --rect 72,700,300,720 \
+    --fill 0,0,0 --text REDACTED --images pixels --graphics covered --scrub
+pdfwords insert-text in.pdf -o out.pdf --page 0 --point 72,72 --text "Approved\nQ. Dang" --fontname hebo
+pdfwords insert-text in.pdf -o out.pdf --rect 72,100,300,200 --align justify --text "..." --fontfile font.ttf
+pdfwords contents in.pdf --pages 0      # decoded content streams
 ```
 
 ## Backends
@@ -151,6 +205,9 @@ superscript detection are all 1.0, and block agreement is 0.996. See
   (`parallel_words`).
 * **Base-14 metrics.** Boxes of non-embedded base-14 fonts follow PDFium's substitute metrics,
   which differ slightly from PyMuPDF's.
+* **Editing** has no text shaping: complex scripts that need GSUB/GPOS shaping (Arabic,
+  Devanagari, ...) are not supported. Precomposed Latin, including Vietnamese, works. For other
+  redaction limits see [docs/EDITING.md](docs/EDITING.md#limits).
 
 ## Roadmap
 
@@ -160,7 +217,7 @@ superscript detection are all 1.0, and block agreement is 0.996. See
     built with `cargo ndk`;
   * static linking of PDFium.
 * Publish `pdfwords-core` to crates.io.
-* Image blocks, `search_for`-style quads, a header/footer filter, and better reading order.
+* Image blocks, a header/footer filter, and better reading order.
 * An optional OCR fallback that emits the same schema.
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture.
