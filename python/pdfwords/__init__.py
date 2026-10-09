@@ -25,9 +25,11 @@ import pypdfium2 as pdfium
 from .chars import page_glyphs, crop_box, TEXT_FONT_SUPERSCRIPT, TEXT_FONT_ITALIC, TEXT_FONT_SERIFED, TEXT_FONT_MONOSPACED, TEXT_FONT_BOLD  # noqa: F401
 from .layout import build_blocks, make_spans, LayoutParams, DEFAULT_PARAMS  # noqa: F401
 from .order import sort_simple, sort_xycut
+from .annots import LINK_NONE, LINK_GOTO, LINK_URI, LINK_LAUNCH, LINK_NAMED, LINK_GOTOR  # noqa: F401
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["open", "Document", "Page", "available_backends", "default_backend", "parallel_words", "__version__",
+           "extract", "iter_pages", "LINK_NONE", "LINK_GOTO", "LINK_URI", "LINK_LAUNCH", "LINK_NAMED", "LINK_GOTOR",
            "PDF_REDACT_IMAGE_NONE", "PDF_REDACT_IMAGE_REMOVE", "PDF_REDACT_IMAGE_PIXELS",
            "PDF_REDACT_LINE_ART_NONE", "PDF_REDACT_LINE_ART_REMOVE_IF_COVERED", "PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED",
            "PDF_REDACT_TEXT_REMOVE", "PDF_REDACT_TEXT_NONE"]
@@ -79,25 +81,65 @@ def default_backend():
     return available_backends()[0]
 
 
-def open(source, password=None, backend=None):  # noqa: A001  (mirror pymupdf.open)
-    """backend: "rust" (native core, default when pdfwords_rs is installed) | "python"."""
-    return Document(source, password, backend=backend)
+def open(source, password=None, backend=None, flatten=False):  # noqa: A001  (mirror pymupdf.open)
+    """source: path, bytes or a binary file object.
+    backend: "rust" (native core, default when the extension is built) | "python".
+    flatten: render form-field values and annotation appearances into the page content before
+        extraction (PDFium FPDFPage_Flatten), so filled-in form values come out as text."""
+    return Document(source, password, backend=backend, flatten=flatten)
 
 
 class Document:
-    def __init__(self, source, password=None, backend=None):
+    def __init__(self, source, password=None, backend=None, flatten=False):
         self.backend = backend or default_backend()
         if self.backend not in ("rust", "python"):
             raise ValueError(f"unknown backend {self.backend!r}")
         if self.backend == "rust":
             _rust()
+        if hasattr(source, "read"):          # file objects: read once, then behave like bytes
+            if hasattr(source, "seek"):
+                source.seek(0)
+            source = source.read()
+        if isinstance(source, (bytearray, memoryview)):
+            source = bytes(source)
         self._source, self._password = source, password
         self.name = _os.fspath(source) if isinstance(source, (str, _os.PathLike)) else ""
-        self._pdf = pdfium.PdfDocument(source, password=password)
+        self._flatten = bool(flatten)
+        self._pdf = self._open_pdfium(source)
         self._ed = None        # pypdf-based editor, created on first edit / raw access
         self._dirty = False    # editor has changes PDFium has not seen yet
         self._gen = 0          # bumped whenever PDFium re-opens the edited bytes
         self._buf = None
+        self._fpdf = None      # second PDFium handle with the form environment (widgets())
+
+    def _open_pdfium(self, src):
+        pdf = pdfium.PdfDocument(src, password=self._password)
+        self._flat_done = set()
+        if self._flatten:
+            _init_forms(pdf)   # must precede page loading
+        return pdf
+
+    def _flat(self, i):
+        """Flatten page i once (flatten=True): forms/annotations become page content."""
+        if self._flatten and i not in self._flat_done:
+            import pypdfium2.raw as R
+            p = self._pdf[i]
+            try:
+                R.FPDFPage_Flatten(p.raw, R.FLAT_NORMALDISPLAY)
+            finally:
+                p.close()
+            self._flat_done.add(i)
+
+    def _current_source(self):
+        """Path or bytes of the document as it is now (edited bytes after edits)."""
+        self._sync()
+        return self._buf if self._gen > 0 else self._source
+
+    def _forms_pdf(self):
+        if self._fpdf is None:
+            self._fpdf = pdfium.PdfDocument(self._current_source(), password=self._password if self._gen == 0 else None)
+            _init_forms(self._fpdf)
+        return self._fpdf
 
     # ------------------------------------------------------------------ editing plumbing
     def _editor(self):
@@ -109,10 +151,6 @@ class Document:
                     data = f.read()
             elif isinstance(src, (bytes, bytearray, memoryview)):
                 data = bytes(src)
-            elif hasattr(src, "read"):
-                if hasattr(src, "seek"):
-                    src.seek(0)
-                data = src.read()
             else:
                 raise TypeError("editing needs a path, bytes or a file object as source")
             self._ed = _editor_cls()(data, self._password)
@@ -126,9 +164,12 @@ class Document:
         if self._dirty:
             data = self._ed.to_bytes()
             old = self._pdf
-            self._pdf = pdfium.PdfDocument(data)
+            self._pdf = self._open_pdfium(data)
             self._buf = data
             old.close()
+            if self._fpdf is not None:
+                self._fpdf.close()
+                self._fpdf = None
             self._gen += 1
             self._dirty = False
 
@@ -210,7 +251,34 @@ class Document:
         for i in range(len(self)):
             yield self[i]
 
+    # ------------------------------------------------------------------ document-level reading
+    def get_toc(self, simple=True):
+        """Outline / bookmarks: [[level, title, page], ...] (1-based level and page, like PyMuPDF)."""
+        from .annots import get_toc
+        self._sync()
+        return get_toc(self, simple)
+
+    def text_quality(self, pages=None, **kw):
+        """Per-page text-layer quality reports (see Page.text_quality)."""
+        return [self[i].text_quality(**kw) for i in _page_list(pages, len(self))]
+
+    def needs_ocr(self, pages=None, **kw):
+        """Page numbers whose text layer is missing or unusable (see Page.text_quality)."""
+        return [r["page"] for r in self.text_quality(pages, **kw) if r["needs_ocr"]]
+
+    def iter_pages(self, mode="text", pages=None, workers=None, **kw):
+        """Yield (page_number, page.get_text(mode, **kw)) in page order, streaming: with workers
+        > 1 pages are extracted by a process pool and yielded as soon as they are in order."""
+        yield from _iter_doc(self, mode, pages, workers, kw)
+
+    def extract(self, mode="text", pages=None, workers=None, **kw):
+        """[page.get_text(mode, **kw) for the selected pages], optionally with a process pool."""
+        return [r for _, r in self.iter_pages(mode, pages, workers, **kw)]
+
     def close(self):
+        if self._fpdf is not None:
+            self._fpdf.close()
+            self._fpdf = None
         self._pdf.close()
 
     def __enter__(self):
@@ -243,6 +311,7 @@ class Page:
     def _page(self):
         self._fresh()
         if self._pg is None:
+            self.parent._flat(self.number)
             self._pg = self.parent._pdf[self.number]
         return self._pg
 
@@ -250,6 +319,7 @@ class Page:
         self._fresh()
         key = ("rs", ligatures)
         if key not in self._cache:
+            self.parent._flat(self.number)
             self._cache[key] = _rust().load_page(self.parent._addr, self.number, ligatures)
         return self._cache[key]
 
@@ -333,7 +403,7 @@ class Page:
         return pt, rc
 
     def get_text(self, option="text", *, sort=False, clip=True, rotated=False,
-                 ligatures=False, dehyphenate=False, delimiters=None, extended=False):
+                 ligatures=False, dehyphenate=False, delimiters=None, extended=False, links=False):
         """option: text | words | blocks | dict | rawdict | json | rawjson.
         sort: False (content order) | True (PyMuPDF-style y/x) | "xycut" (column-aware).
         ligatures: False (default) -> ligature glyphs come out as plain letters ("fi"), the first
@@ -342,8 +412,15 @@ class Page:
         dehyphenate: join words broken by a line-end hyphen (text/words/blocks).
         extended: dict/rawdict only - spans also carry "weight" (font weight) and "pdf_flags"
             (font descriptor flags), rawdict chars carry "idx" (PDFium char index, i.e. content
-            stream order; -1 for inserted spaces)."""
+            stream order; -1 for inserted spaces).
+        links: dict/rawdict/json only - split spans at link boundaries and give every span a "url"
+            ("" when not linked): link annotations (URIs, "#page=N" for internal targets) and URLs
+            written in the text (auto-detected)."""
         option = option.lower()
+        if links and option in ("dict", "rawdict", "json", "rawjson"):
+            d = self.get_text("rawdict", sort=sort, clip=clip, rotated=rotated, ligatures=ligatures, extended=extended)
+            _split_link_spans(d, self._link_rects(rotated), keep_chars=option.startswith("raw"))
+            return _json.dumps(d, ensure_ascii=False) if option.endswith("json") else d
         if self._rust:
             srt = "xycut" if sort == "xycut" else ("simple" if sort else "none")
             if option in ("json", "rawjson"):
@@ -370,12 +447,71 @@ class Page:
         raise ValueError(f"unsupported option {option!r}")
 
     # ------------------------------------------------------------------ search
-    def search_for(self, needle, *, quads=False, clip=None, regex=False, ignore_case=True, rotated=False):
+    def search_for(self, needle, *, quads=False, clip=None, regex=False, ignore_case=True, rotated=False,
+                   hit_max=None, dehyphenate=True):
         """Rectangles (x0, y0, x1, y1) of every occurrence of `needle` (plain text, or a regular
         expression with regex=True), one rectangle per line an occurrence spans. Matching is
         case-insensitive by default and treats any run of whitespace / line breaks as one space.
+        dehyphenate: a word broken by a line-end hyphen ("hyphen-" / "ation") matches "hyphenation"
+            (and "well-known" still matches "well-" / "known").
+        hit_max: stop after this many occurrences.
         quads=True returns 4-point tuples (ul, ur, ll, lr) instead."""
-        return _search(self, needle, quads=quads, clip=clip, regex=regex, ignore_case=ignore_case, rotated=rotated)
+        return _search(self, needle, quads=quads, clip=clip, regex=regex, ignore_case=ignore_case, rotated=rotated,
+                       hit_max=hit_max, dehyphenate=dehyphenate)
+
+    # ------------------------------------------------------------------ links, annotations, forms
+    def get_links(self, *, web=False, rotated=False):
+        """Link annotations as dicts {kind, from, uri | page,to,zoom | file, id[, quads]}, `kind`
+        one of LINK_URI / LINK_GOTO / LINK_GOTOR / LINK_LAUNCH / LINK_NONE (PyMuPDF values),
+        `page` 0-based, `to` the target point on that page (our coordinates).
+        web=True also returns URLs written in the text without an annotation ({..., auto: True})."""
+        from .annots import get_links
+        return get_links(self, web=web, rotated=rotated)
+
+    def annots(self, types=None, *, rotated=False):
+        """Annotations: dicts {type, rect, contents, author, subject, id, modified, flags,
+        stroke, fill, quads, index}. `types`: optional set of type names ("Highlight", ...)."""
+        from .annots import annots
+        if isinstance(types, str):
+            types = {types}
+        return annots(self, types=set(types) if types else None, rotated=rotated)
+
+    def widgets(self, *, rotated=False):
+        """Form fields: annots of type "Widget" plus field_name, field_label, field_type,
+        field_value, field_flags, checked/on_state (check boxes, radios), choices (list/combo)."""
+        from .annots import widgets
+        return widgets(self, rotated=rotated)
+
+    def _link_rects(self, rotated):
+        from .annots import link_url
+        out = []
+        for lk in self.get_links(web=True, rotated=rotated):
+            url = link_url(lk)
+            if not url:
+                continue
+            rects = lk.get("rects") or ([_quad_rect(q) for q in lk["quads"]] if lk.get("quads") else [lk["from"]])
+            out.extend((r, url) for r in rects)
+        return out
+
+    # ------------------------------------------------------------------ quality, tables
+    def text_quality(self, **kw):
+        """Text-layer quality report: {needs_ocr, score, reasons, chars, invisible_ratio,
+        unicode_error_ratio, garbled_ratio, image_coverage, images, fonts}. See pdfwords.quality."""
+        from .quality import text_quality
+        return text_quality(self, **kw)
+
+    def needs_ocr(self, **kw):
+        """True when the page has no usable text layer (scan without text, garbled/unmapped text)."""
+        return self.text_quality(**kw)["needs_ocr"]
+
+    def table_cells(self, cells, image_size=None, *, rotated=True, min_overlap=0.5):
+        """Assign the page's words to given table-cell boxes (e.g. from a layout model).
+        cells: [(x0, y0, x1, y1), ...] in page coordinates, or in pixels of an image of size
+        image_size=(w, h) rendered from the displayed page. Returns, per cell,
+        {"bbox", "text", "words": [(x0, y0, x1, y1, word), ...]} with words in reading order
+        (by line, then x); a word goes to the cell covering most of it (>= min_overlap)."""
+        from .tables import assign_cells
+        return assign_cells(self, cells, image_size, rotated=rotated, min_overlap=min_overlap)
 
     # ------------------------------------------------------------------ editing (pdfwords[edit])
     def read_contents(self):
@@ -559,6 +695,19 @@ class Page:
 # ---------------------------------------------------------------------- helpers
 import builtins as _builtins  # noqa: E402
 
+
+def _init_forms(pdf):
+    """pdf.init_forms() without pypdfium2's "no XFA support" log line (AcroForm still works)."""
+    import logging
+    lg = logging.getLogger("pypdfium2._helpers.document")
+    old = lg.level
+    lg.setLevel(logging.ERROR)
+    try:
+        pdf.init_forms()
+    finally:
+        lg.setLevel(old)
+
+
 _open_file = _builtins.open  # pdfwords.open shadows the builtin in this module
 
 
@@ -621,14 +770,23 @@ def _unmatched(chars, pool, tol=0.05):
     return bad
 
 
-def _search(page, needle, quads=False, clip=None, regex=False, ignore_case=True, rotated=False):
+_HYPHENS = "-\u00ad\u2010"
+
+
+def _search(page, needle, quads=False, clip=None, regex=False, ignore_case=True, rotated=False,
+            hit_max=None, dehyphenate=True):
     import re
     d = page.get_text("rawdict", clip=clip if clip is not None else True, rotated=rotated)
     text = []
     boxes = []   # parallel to text: (line_key, bbox) or None for separators
     for bi, b in enumerate(d["blocks"]):
         for li, ln in enumerate(b["lines"]):
-            if text and text[-1] != " ":
+            first = next((ch["c"] for sp in ln["spans"] for ch in sp["chars"] if ch["c"].strip()), "")
+            if (dehyphenate and li > 0 and len(text) >= 2 and text[-1] in _HYPHENS and text[-2].isalpha()
+                    and first.isalpha()):
+                text.pop()   # line-end hyphen: join the word halves
+                boxes.pop()
+            elif text and text[-1] != " ":
                 text.append(" ")
                 boxes.append(None)
             for sp in ln["spans"]:
@@ -645,11 +803,15 @@ def _search(page, needle, quads=False, clip=None, regex=False, ignore_case=True,
         pat = needle
     else:
         pat = r"\s+".join(re.escape(w) for w in needle.split())
+        if dehyphenate:   # "well-known" must still match a line-broken "well-" / "known"
+            pat = pat.replace(re.escape("-"), "-?")
     if not pat:
         return []
     rx = re.compile(pat, re.IGNORECASE if ignore_case else 0)
     out = []
-    for m in rx.finditer(s):
+    for hits, m in enumerate(rx.finditer(s)):
+        if hit_max is not None and hits >= hit_max:
+            break
         groups = {}
         order = []
         for k in range(m.start(), m.end()):
@@ -669,26 +831,101 @@ def _search(page, needle, quads=False, clip=None, regex=False, ignore_case=True,
     return out
 
 
+def _split_link_spans(d, links, keep_chars):
+    """Split rawdict spans where the covering link changes; every span gets "url"."""
+    from .annots import char_urls
+    for b in d["blocks"]:
+        for ln in b["lines"]:
+            new = []
+            for sp in ln["spans"]:
+                chars = sp["chars"]
+                urls = (char_urls([c["bbox"] for c in chars], links, texts=[c["c"] for c in chars])
+                        if links else [""] * len(chars))
+                start = 0
+                for k in range(1, len(chars) + 1):
+                    if k == len(chars) or urls[k] != urls[start]:
+                        part = chars[start:k]
+                        ns = {key: v for key, v in sp.items() if key not in ("chars", "bbox", "origin", "text")}
+                        bbs = [c["bbox"] for c in part]
+                        ns["bbox"] = (min(x[0] for x in bbs), min(x[1] for x in bbs),
+                                      max(x[2] for x in bbs), max(x[3] for x in bbs))
+                        ns["origin"] = part[0]["origin"]
+                        ns["text"] = "".join(c["c"] for c in part)
+                        ns["url"] = urls[start]
+                        if keep_chars:
+                            ns["chars"] = part
+                        new.append(ns)
+                        start = k
+                if not chars:
+                    ns = {key: v for key, v in sp.items() if key != "chars"}
+                    ns.setdefault("text", "")
+                    ns["url"] = ""
+                    if keep_chars:
+                        ns["chars"] = []
+                    new.append(ns)
+            ln["spans"] = new
+
+
+def _page_list(pages, n):
+    """Normalise pages=None | int | range | iterable (negative numbers count from the end)."""
+    if pages is None:
+        return list(range(n))
+    if isinstance(pages, int):
+        pages = [pages]
+    out = []
+    for p in pages:
+        q = p + n if p < 0 else p
+        if not 0 <= q < n:
+            raise IndexError(f"page {p} out of range (document has {n} pages)")
+        out.append(q)
+    return out
+
+
 # ---------------------------------------------------------------------- parallelism
-def _pw_worker(args):
-    path, pages, kw, backend = args
-    with open(path, backend=backend) as d:
-        return [(i, d[i].get_text("words", **kw)) for i in pages]
+# PDFium is not thread-safe (global state, no locking), so parallelism is by process: each
+# worker opens its own copy of the document.
+def _pool_worker(args):
+    src, password, backend, flatten, pages, mode, kw = args
+    with open(src, password, backend=backend, flatten=flatten) as d:
+        return [(i, d[i].get_text(mode, **kw)) for i in pages]
+
+
+def _iter_doc(doc, mode, pages, workers, kw):
+    pages = _page_list(pages, len(doc))
+    if not workers or workers <= 1 or len(pages) < 2:
+        for i in pages:
+            yield i, doc[i].get_text(mode, **kw)
+        return
+    import concurrent.futures as cf
+    src = doc._current_source()
+    password = doc._password if doc._gen == 0 else None
+    workers = min(workers, len(pages))
+    size = max(1, min(32, -(-len(pages) // (workers * 4))))   # small contiguous chunks -> streaming
+    chunks = [pages[i:i + size] for i in range(0, len(pages), size)]
+    with cf.ProcessPoolExecutor(workers) as ex:
+        futs = [ex.submit(_pool_worker, (src, password, doc.backend, doc._flatten, c, mode, kw)) for c in chunks]
+        for f in futs:            # in page order; later chunks keep running meanwhile
+            yield from f.result()
+
+
+def iter_pages(source, mode="text", pages=None, workers=None, *, password=None, backend=None, flatten=False, **kw):
+    """Stream (page_number, result) for a path / bytes / file object; see Document.iter_pages."""
+    with open(source, password, backend=backend, flatten=flatten) as d:
+        yield from d.iter_pages(mode, pages, workers, **kw)
+
+
+def extract(source, mode="text", pages=None, workers=None, *, password=None, backend=None, flatten=False, **kw):
+    """[get_text(mode, **kw) per selected page] for a path / bytes / file object.
+    pages: None (all) | int | iterable of page numbers; workers: process count (None = serial)."""
+    return [r for _, r in iter_pages(source, mode, pages, workers, password=password, backend=backend,
+                                     flatten=flatten, **kw)]
 
 
 def parallel_words(path, pages=None, processes=None, backend=None, **kw):
-    """get_text("words") for many pages using a process pool. PDFium is not thread-safe
-    (global state, no locking), so parallelism is by process: each worker opens its own
-    document. Returns a list indexed like `pages`."""
-    import concurrent.futures as cf
+    """get_text("words") for many pages using a process pool (kept for 0.1 compatibility;
+    same as extract(path, "words", pages, workers=processes or cpu_count)).
+    Returns a list indexed like `pages`."""
     with open(path, backend=backend) as d:
-        n = len(d)
-        backend = d.backend
-    pages = list(range(n)) if pages is None else list(pages)
-    processes = processes or min(len(pages), _os.cpu_count() or 1)
-    chunks = [pages[i::processes] for i in range(processes)]
-    res = {}
-    with cf.ProcessPoolExecutor(processes) as ex:
-        for part in ex.map(_pw_worker, [(path, c, kw, backend) for c in chunks if c]):
-            res.update(part)
-    return [res[i] for i in pages]
+        pages = _page_list(pages, len(d))
+        workers = processes or min(len(pages), _os.cpu_count() or 1)
+        return d.extract("words", pages, workers, **kw)

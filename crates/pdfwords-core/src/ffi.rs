@@ -7,7 +7,7 @@
 #![allow(non_snake_case, non_camel_case_types)]
 
 use libloading::Library;
-use std::os::raw::{c_char, c_double, c_float, c_int, c_uint, c_void};
+use std::os::raw::{c_char, c_double, c_float, c_int, c_uint, c_ulong, c_void};
 
 pub type FPDF_DOCUMENT = *mut c_void;
 pub type FPDF_PAGE = *mut c_void;
@@ -80,6 +80,7 @@ pdfium_api! {
     FPDFText_GetTextObject: fn(FPDF_TEXTPAGE, c_int) -> FPDF_PAGEOBJECT;
     FPDFText_GetMatrix: fn(FPDF_TEXTPAGE, c_int, *mut FS_MATRIX) -> c_int;
     FPDFText_GetFontSize: fn(FPDF_TEXTPAGE, c_int) -> c_double;
+    FPDFText_GetFontInfo: fn(FPDF_TEXTPAGE, c_int, *mut c_void, c_ulong, *mut c_int) -> c_ulong;
     FPDFText_GetFillColor: fn(FPDF_TEXTPAGE, c_int, *mut c_uint, *mut c_uint, *mut c_uint, *mut c_uint) -> c_int;
     FPDFTextObj_GetFontSize: fn(FPDF_PAGEOBJECT, *mut c_float) -> c_int;
     FPDFTextObj_GetFont: fn(FPDF_PAGEOBJECT) -> FPDF_FONT;

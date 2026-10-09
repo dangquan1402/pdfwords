@@ -85,3 +85,11 @@ jobs:
           pdfwords insert-text redacted.pdf -o inserted.pdf --text "smoke test" --point 72,72
           pdfwords inserted.pdf --mode text --pages 0 | grep -q "smoke test"
           ! pdfwords inserted.pdf --mode text | grep -qi "taxpayer"
+          pdfwords tests/fixtures/irs_w9.pdf --mode words --workers 2 --flatten -o words.json
+          test -s words.json
+          pdfwords quality tests/fixtures/irs_w9.pdf | grep -q '"needs_ocr": \[\]'
+          pdfwords pdftext tests/fixtures/simple_text.pdf | grep -q "Simple test document"
+          pdfwords pdftext tests/fixtures/simple_text.pdf --json --keep_chars | grep -q '"char_idx"'
+          pdfwords links tests/fixtures/simple_text.pdf > /dev/null
+          pdfwords debug tests/fixtures/irs_w9.pdf --page 0 --show words,blocks,order -o overlay.png
+          test -s overlay.png

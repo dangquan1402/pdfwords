@@ -145,6 +145,8 @@ pub struct PageGlyphs {
     pub height: f64,
     /// /Rotate in degrees (0, 90, 180, 270)
     pub rotation: i32,
+    /// the CropBox (or its fallback) in PDF user space: (l, b, r, t)
+    pub crop: [f64; 4],
     pub glyphs: Vec<Glyph>,
     pub fonts: Vec<FontInfo>,
     pub n_chars: i32,
@@ -286,7 +288,15 @@ pub unsafe fn glyphs_from_textpage(
                     Some(&ix) => ix,
                     None => {
                         let ix = fonts.len() as u32;
-                        fonts.push(font_info(p, font));
+                        let mut info = font_info(p, font);
+                        // the flags PDFium reports for text (FPDFText_GetFontInfo): descriptor
+                        // flags plus PDFium's internal bits, as pdftext exposes them
+                        let mut tflags: c_int = 0;
+                        if (p.FPDFText_GetFontInfo)(tp, i, std::ptr::null_mut(), 0, &mut tflags) > 0
+                        {
+                            info.pdf_flags = tflags;
+                        }
+                        fonts.push(info);
                         font_idx.insert(fk, ix);
                         ix
                     }
@@ -386,6 +396,7 @@ pub unsafe fn glyphs_from_textpage(
         width,
         height,
         rotation,
+        crop: [l, b, r, t],
         glyphs,
         fonts,
         n_chars: n,
