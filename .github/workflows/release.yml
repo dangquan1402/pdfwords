@@ -1,0 +1,135 @@
+# Builds abi3 wheels (CPython >= 3.9) + sdist and publishes to PyPI on version tags.
+#
+# Publishing uses PyPI *trusted publishing* (OIDC, no API token). One-time setup on PyPI:
+#   https://pypi.org/manage/account/publishing/  ->  "Add a new pending publisher"
+#     PyPI project name: pdfwords        Owner: dangquan1402      Repository: pdfwords
+#     Workflow name: release.yml         Environment name: pypi
+# and create the "pypi" environment in GitHub: Settings -> Environments -> New environment.
+# Then: git tag v0.1.0 && git push origin v0.1.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Wheel linux-${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: "2_28"
+          sccache: "true"
+      - name: Smoke test
+        if: matrix.target == 'x86_64'
+        run: |
+          pip install dist/*.whl
+          cd /tmp && python -c "import pdfwords; assert pdfwords.available_backends() == ['rust', 'python'], pdfwords.available_backends()"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: dist
+
+  macos:
+    name: Wheel macos-${{ matrix.target }}
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          sccache: "true"
+      - name: Smoke test
+        if: matrix.target == 'aarch64'
+        run: |
+          pip install dist/*.whl
+          cd /tmp && python -c "import pdfwords; assert pdfwords.available_backends() == ['rust', 'python'], pdfwords.available_backends()"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-${{ matrix.target }}
+          path: dist
+
+  windows:
+    name: Wheel windows-x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: x64
+          args: --release --out dist
+          sccache: "true"
+      - name: Smoke test
+        shell: bash
+        run: |
+          pip install dist/*.whl
+          cd "$RUNNER_TEMP" && python -c "import pdfwords; assert pdfwords.available_backends() == ['rust', 'python'], pdfwords.available_backends()"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-x64
+          path: dist
+
+  sdist:
+    name: Source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+  publish:
+    name: Publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, macos, windows, sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pdfwords
+    permissions:
+      id-token: write   # trusted publishing
+      contents: write   # attach files to the GitHub release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*"
+          merge-multiple: true
+          path: dist
+      - run: ls -la dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
