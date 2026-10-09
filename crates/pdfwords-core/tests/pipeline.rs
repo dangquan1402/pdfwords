@@ -4,6 +4,11 @@
 use pdfwords_core::layout::{Block, Char, Line};
 use pdfwords_core::output::{self, Xf};
 use pdfwords_core::*;
+use std::sync::Mutex;
+
+/// PDFium is not thread-safe and cargo runs tests on parallel threads: serialise the tests
+/// that call into it.
+static PDFIUM: Mutex<()> = Mutex::new(());
 
 fn ch(c: char, x0: f64, y0: f64, x1: f64, y1: f64) -> Char {
     Char {
@@ -115,6 +120,7 @@ fn default_params_are_sane() {
 
 #[test]
 fn end_to_end_with_pdfium() {
+    let _guard = PDFIUM.lock().unwrap_or_else(|e| e.into_inner());
     let Ok(lib) = std::env::var("PDFWORDS_PDFIUM_LIB") else {
         eprintln!("PDFWORDS_PDFIUM_LIB not set: skipping PDFium end-to-end test");
         return;
@@ -153,6 +159,7 @@ fn end_to_end_with_pdfium() {
 
 #[test]
 fn render_end_to_end() {
+    let _guard = PDFIUM.lock().unwrap_or_else(|e| e.into_inner());
     let Ok(lib) = std::env::var("PDFWORDS_PDFIUM_LIB") else {
         eprintln!("PDFWORDS_PDFIUM_LIB not set: skipping PDFium render test");
         return;
