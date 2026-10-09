@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""python -m pdfwords file.pdf [--mode words|dict|rawdict|blocks|text] [--pages 0,2-4] [--sort xycut]"""
+"""pdfwords file.pdf [--mode words|dict|rawdict|blocks|text] [--pages 0,2-4] [--sort xycut]"""
 import argparse
 import json
 import sys
@@ -36,7 +36,13 @@ def main(argv=None):
         s = "\f".join(r["content"] for r in res)
     else:
         s = json.dumps(res, ensure_ascii=False)
-    (open(a.out, "w", encoding="utf-8").write(s) if a.out else sys.stdout.write(s + "\n"))
+    if a.out:
+        with open(a.out, "w", encoding="utf-8") as f:
+            f.write(s)
+    else:
+        if hasattr(sys.stdout, "reconfigure"):  # Windows pipes default to the ANSI code page
+            sys.stdout.reconfigure(encoding="utf-8")
+        sys.stdout.write(s + "\n")
 
 
 if __name__ == "__main__":
