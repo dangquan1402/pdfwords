@@ -6,10 +6,12 @@ pub mod glyphs;
 pub mod layout;
 pub mod order;
 pub mod output;
+pub mod render;
 
 pub use ffi::Pdfium;
 pub use glyphs::{extract_page, open_document, FontInfo, Glyph, PageGlyphs, Timings};
 pub use layout::{build_blocks, Block, Char, LayoutParams, Line};
+pub use render::{render_page, Geometry, RenderOptions};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sort {

@@ -34,6 +34,10 @@ pdfwords.compat.pdftext reproduces the public API and output schema of pdftext
 (https://github.com/datalab-to/pdftext, Copyright Vik Paruchuri, Apache-2.0). It is an
 independent implementation on pdfwords' engine; no pdftext code is included.
 
+pdfwords.compat.pdf2image reproduces the public API of pdf2image
+(https://github.com/Belval/pdf2image, Copyright Edouard Belval, MIT). It is an independent
+implementation on PDFium; no pdf2image code is included and poppler is not used.
+
 Optional visual debugging (the "debug" extra) uses Pillow (MIT-CMU / HPND) when installed.
 
 The output format is designed to be compatible with PyMuPDF's Page.get_text(). pdfwords is not

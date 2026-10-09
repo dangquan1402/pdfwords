@@ -25,11 +25,12 @@ import pypdfium2 as pdfium
 from .chars import page_glyphs, crop_box, TEXT_FONT_SUPERSCRIPT, TEXT_FONT_ITALIC, TEXT_FONT_SERIFED, TEXT_FONT_MONOSPACED, TEXT_FONT_BOLD  # noqa: F401
 from .layout import build_blocks, make_spans, LayoutParams, DEFAULT_PARAMS  # noqa: F401
 from .order import sort_simple, sort_xycut
+from .render import RenderTimeout, Pixmap  # noqa: F401
 from .annots import LINK_NONE, LINK_GOTO, LINK_URI, LINK_LAUNCH, LINK_NAMED, LINK_GOTOR  # noqa: F401
 
 __version__ = "0.2.0"
 __all__ = ["open", "Document", "Page", "available_backends", "default_backend", "parallel_words", "__version__",
-           "extract", "iter_pages", "LINK_NONE", "LINK_GOTO", "LINK_URI", "LINK_LAUNCH", "LINK_NAMED", "LINK_GOTOR",
+           "extract", "iter_pages", "RenderTimeout", "Pixmap", "convert_from_path", "convert_from_bytes", "LINK_NONE", "LINK_GOTO", "LINK_URI", "LINK_LAUNCH", "LINK_NAMED", "LINK_GOTOR",
            "PDF_REDACT_IMAGE_NONE", "PDF_REDACT_IMAGE_REMOVE", "PDF_REDACT_IMAGE_PIXELS",
            "PDF_REDACT_LINE_ART_NONE", "PDF_REDACT_LINE_ART_REMOVE_IF_COVERED", "PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED",
            "PDF_REDACT_TEXT_REMOVE", "PDF_REDACT_TEXT_NONE"]
@@ -275,6 +276,18 @@ class Document:
         """[page.get_text(mode, **kw) for the selected pages], optionally with a process pool."""
         return [r for _, r in self.iter_pages(mode, pages, workers, **kw)]
 
+    def iter_images(self, pages=None, dpi=None, *, workers=None, **kw):
+        """Yield (page_number, image) streaming in page order; kw as Page.render."""
+        from .render import iter_images
+        return iter_images(self, pages, dpi, workers=workers, **kw)
+
+    def to_images(self, pages=None, dpi=150, *, workers=None, fmt="jpeg", quality=90, out_dir=None,
+                  name="{stem}-{page:04d}.{ext}", **kw):
+        """Render pages to files in out_dir (returns the paths) or to a list of PIL images."""
+        from .render import to_images
+        return to_images(self, pages, dpi, workers=workers, fmt=fmt, quality=quality, out_dir=out_dir,
+                         name=name, **kw)
+
     def close(self):
         if self._fpdf is not None:
             self._fpdf.close()
@@ -326,10 +339,10 @@ class Page:
     def _geometry(self):
         self._fresh()
         if self._geom is None:
-            if self._rust:
-                rp = self._rs(False)
+            rp = self._cache.get(("rs", False)) or self._cache.get(("rs", True))
+            if rp is not None:
                 self._geom = (rp.width, rp.height, rp.rotation % 360)
-            else:
+            else:   # page box only - no text extraction (render() and friends need just this)
                 l, b, r, t = crop_box(self._page)
                 self._geom = (abs(r - l), abs(t - b), self._page.get_rotation() % 360)
         return self._geom
@@ -512,6 +525,61 @@ class Page:
         (by line, then x); a word goes to the cell covering most of it (>= min_overlap)."""
         from .tables import assign_cells
         return assign_cells(self, cells, image_size, rotated=rotated, min_overlap=min_overlap)
+
+    # ------------------------------------------------------------------ rendering
+    def render(self, dpi=None, **kw):
+        """Rasterize the page with PDFium. Returns a numpy uint8 array (H, W, 3) RGB by default.
+        dpi (default 150) | scale= | size=(w, h) (one may be None) | max_side=: resolution.
+        clip=(x0, y0, x1, y1): region in get_text() coordinates (pixel-aligned with full renders).
+        rotated=True: the page as displayed (False: unrotated, matching rotated=False bboxes).
+        alpha=True: RGBA, transparent background. grayscale=True: (H, W), ~2x faster.
+        annots / forms (AcroForm values): drawn by default. background=(r, g, b[, a]).
+        antialias=False: crisp, unsmoothed text/paths/images. output: "numpy" | "pil" | "bytes"
+        (raw samples) | "png" | "jpeg" | "webp" | "tiff" (encoded, needs Pillow).
+        timeout=seconds: abort with pdfwords.RenderTimeout. out=: reuse a preallocated array.
+        max_pixels: guard against huge pages (default 2**28; None disables)."""
+        from .render import render
+        return render(self, dpi, **kw)
+
+    def get_pixmap(self, **kw):
+        """PyMuPDF-style: get_pixmap(matrix=, dpi=, colorspace="rgb"|"gray", clip=, alpha=,
+        annots=) -> Pixmap (width, height, n, samples, tobytes("png"), save(), pil_image())."""
+        from .render import get_pixmap
+        return get_pixmap(self, **kw)
+
+    def render_tiles(self, dpi=None, tile=2048, **kw):
+        """Iterate ((x, y), image) tiles of the full-page raster (pixel-identical to a full render)."""
+        from .render import render_tiles
+        return render_tiles(self, dpi, tile, **kw)
+
+    def thumbnail(self, max_side=256, **kw):
+        """Small preview (longest side max_side px), without annotations/forms by default."""
+        kw.setdefault("annots", False)
+        kw.setdefault("forms", False)
+        return self.render(max_side=max_side, **kw)
+
+    def render_geometry(self, dpi=None, **kw):
+        """Pixel geometry of render(dpi, **kw): {full_w, full_h, sx, sy, px0, py0, w, h, rotated}."""
+        from .render import geometry
+        kw = {k: v for k, v in kw.items() if k in ("scale", "size", "max_side", "clip", "rotated")}
+        return geometry(self, dpi=dpi, **kw).as_dict()
+
+    def pixel_to_pdf(self, px, py, dpi=None, **kw):
+        """Pixel (px, py) of render(dpi, **kw) -> (x, y) in get_text() coordinates (rotated=True
+        by default: the displayed page, i.e. get_text(..., rotated=True))."""
+        from .render import pixel_to_pdf
+        return pixel_to_pdf(self, px, py, dpi=dpi, **kw)
+
+    def pdf_to_pixel(self, x, y, dpi=None, **kw):
+        """(x, y) in get_text() coordinates -> pixel position in render(dpi, **kw)."""
+        from .render import pdf_to_pixel
+        return pdf_to_pixel(self, x, y, dpi=dpi, **kw)
+
+    def bbox_to_pixel(self, bbox, dpi=None, **kw):
+        """A bbox (x0, y0, x1, y1) in get_text() coordinates -> pixel box in render(dpi, **kw)."""
+        a = self.pdf_to_pixel(bbox[0], bbox[1], dpi, **kw)
+        b = self.pdf_to_pixel(bbox[2], bbox[3], dpi, **kw)
+        return (a[0], a[1], b[0], b[1])
 
     # ------------------------------------------------------------------ editing (pdfwords[edit])
     def read_contents(self):
@@ -870,6 +938,19 @@ def _page_list(pages, n):
     """Normalise pages=None | int | range | iterable (negative numbers count from the end)."""
     if pages is None:
         return list(range(n))
+    if isinstance(pages, str):   # "0,2-5", "-1"
+        spec, pages = pages, []
+        for part in spec.replace(" ", "").split(","):
+            if not part:
+                continue
+            lo, sep, hi = part[1:].partition("-") if part.startswith("-") else part.partition("-")
+            if part.startswith("-"):
+                lo = "-" + lo
+            if sep:
+                a, b = int(lo), int(hi) if hi else n - 1
+                pages.extend(range(a, b + 1))
+            else:
+                pages.append(int(lo))
     if isinstance(pages, int):
         pages = [pages]
     out = []
@@ -929,3 +1010,15 @@ def parallel_words(path, pages=None, processes=None, backend=None, **kw):
         pages = _page_list(pages, len(d))
         workers = processes or min(len(pages), _os.cpu_count() or 1)
         return d.extract("words", pages, workers, **kw)
+
+
+def convert_from_path(pdf_path, dpi=200, **kw):
+    """pdf2image.convert_from_path drop-in (PDFium, no poppler): see pdfwords.compat.pdf2image."""
+    from .compat.pdf2image import convert_from_path as f
+    return f(pdf_path, dpi, **kw)
+
+
+def convert_from_bytes(pdf_file, dpi=200, **kw):
+    """pdf2image.convert_from_bytes drop-in: see pdfwords.compat.pdf2image."""
+    from .compat.pdf2image import convert_from_bytes as f
+    return f(pdf_file, dpi, **kw)

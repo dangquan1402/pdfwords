@@ -123,6 +123,40 @@ from pdfwords.debug import overlay
 overlay(page, show=("words", "blocks", "order")).save("p.png")   # chars words lines spans blocks order links annots widgets cells
 ```
 
+## Rendering
+
+Pages are rendered by PDFium, the same engine that extracts the text, so pixels and word boxes
+line up exactly. There is no poppler and no new dependency: numpy is needed for arrays, and
+Pillow for PIL or encoded output. See [docs/RENDERING.md](docs/RENDERING.md).
+
+```python
+img = page.render(dpi=150)                     # numpy (H, W, 3) RGB; grayscale=True, alpha=True, clip=...
+img = page.render(max_side=1600, output="pil") # or size=(w, None), scale=2; output "png"/"jpeg"/"bytes"
+px_box = page.bbox_to_pixel(word[:4], dpi=150) # word boxes -> pixels (pixel_to_pdf / pdf_to_pixel)
+pix = page.get_pixmap(dpi=144)                 # PyMuPDF-style Pixmap shim
+for (x, y), tile in page.render_tiles(dpi=600, tile=2048): ...
+doc.to_images(dpi=150, workers=8, fmt="jpeg", out_dir="out/")   # files; iter_images() streams arrays
+images = pdfwords.convert_from_path("f.pdf", dpi=200)           # pdf2image drop-in (pdfwords.compat.pdf2image)
+```
+
+* Sizes are `round(points × dpi / 72)`. pypdfium2's `render()` uses `ceil()`, which stretches
+  US Letter to 1651 px at 150 dpi.
+* `timeout=` aborts slow pages, and `max_pixels=` guards against huge pages.
+* `forms=True` draws AcroForm values.
+
+ms/page, whole documents, RGB numpy output (`tools/bench_render.py`):
+
+| PDF | dpi | **pdfwords** | gray | pypdfium2 | PyMuPDF | pdf2image |
+|---|---|---|---|---|---|---|
+| arXiv "Attention" (15 p) | 150 | **18.9** | 16.0 | 19.2 | 22.4 | 74.9 |
+| arXiv "ResNet" (12 p) | 150 | 10.7 | 7.9 | 11.5 | 9.7 | 59.3 |
+| IRS W-9 form (6 p) | 150 | 10.2 | 7.4 | 9.6 | 7.2 | 36.3 |
+| arXiv "Attention" (15 p) | 300 | **38.4** | 30.3 | 42.4 | 46.3 | 190.3 |
+| arXiv "ResNet" (12 p) | 300 | 24.0 | 14.8 | 27.5 | 17.7 | 101.6 |
+
+* pdfwords is 3–6× faster than pdf2image and level with PyMuPDF at ≤ 150 dpi.
+* SSIM against PyMuPDF is 0.97–0.99.
+
 ## Editing: page content, redaction, text insertion
 
 These are PyMuPDF-style methods (`pip install "pdfwords[edit]"`). They use the same
@@ -187,6 +221,8 @@ pdfwords links file.pdf | pdfwords annots file.pdf | pdfwords toc file.pdf
 pdfwords quality file.pdf               # {"needs_ocr": [pages...], "pages": [reports...]}
 pdfwords search file.pdf "net income" --quads
 pdfwords pdftext file.pdf [--json] [--sort] [--keep_hyphens] [--page_range 0,5-10] [--workers N] ...
+pdfwords render file.pdf --pages 0,2-4 --dpi 150 --fmt jpeg --out-dir out/ --workers 8   # --gray --alpha --clip ...
+pdfwords render file.pdf --pages 0 --overlay words,blocks -o debug.png
 ```
 
 ## Backends

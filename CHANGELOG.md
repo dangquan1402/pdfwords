@@ -6,6 +6,39 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Rendering on PDFium** (`docs/RENDERING.md`):
+  - `Page.render(dpi | scale | size | max_side, clip, rotated, alpha, grayscale, annots, forms,
+    background, antialias, output = numpy | pil | bytes | png | jpeg | webp | tiff, timeout,
+    out, max_pixels)`.
+    - It renders straight into a numpy array or bytearray.
+    - It sizes with `round()`, avoiding pypdfium2's `ceil()` 1-px stretch.
+    - AcroForm values are drawn from a form-enabled handle.
+    - `timeout=` uses progressive rendering and raises `pdfwords.RenderTimeout`.
+  - `Page.get_pixmap()`: a PyMuPDF-style `Pixmap` shim (`samples`, `tobytes`, `save`,
+    `pil_image`, numpy).
+  - `Page.render_tiles()`, `Page.thumbnail()`.
+  - `Page.pixel_to_pdf()`, `pdf_to_pixel()`, `bbox_to_pixel()` and `render_geometry()`.
+  - `Document.iter_images()` (streaming), and `Document.to_images(pages, dpi, workers,
+    fmt="jpeg", quality, out_dir, name)`.
+  - `pdfwords.compat.pdf2image`: `convert_from_path`, `convert_from_bytes`,
+    `pdfinfo_from_path` and `pdfinfo_from_bytes`. `pdfwords.convert_from_path` and
+    `convert_from_bytes` are also available directly.
+  - CLI `pdfwords render` (`--pages --dpi/--scale/--max-side/--size --fmt --quality --out-dir
+    --name --workers --gray --alpha --no-annots --no-forms --no-antialias --unrotated --clip
+    --timeout`, and `--overlay words,blocks -o debug.png`).
+  - Rust: `pdfwords_core::render` (`render_page`, `render_loaded_page`, `RenderOptions`,
+    `Geometry`, progressive timeout). It is bit-identical to the Python path, which a parity
+    test checks.
+  - `tools/bench_render.py`: speed and fidelity against pypdfium2, PyMuPDF and pdf2image.
+- `pages=` accepts page-range strings such as `"0,2-5"` and `"-1"`.
+
+### Changed
+- The debug overlay (`pdfwords debug`, `pdfwords.debug.overlay`) uses the new renderer, with
+  exact pixel scale. It also accepts `dpi=`.
+- Page geometry (`page.rect`, `rotation`) no longer extracts the page's text on the Rust
+  backend.
+
 ## [0.2.0] - unreleased
 
 ### Added

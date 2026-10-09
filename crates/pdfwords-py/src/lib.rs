@@ -625,11 +625,50 @@ fn bench_page<'py>(py: Python<'py>, doc_addr: usize, index: i32) -> PyResult<Bou
     Ok(d)
 }
 
+/// Render page `index` of the PDFium document at `doc_addr` (no AcroForm drawing; the Python
+/// package's renderer adds forms). Returns (width, height, channels, pixels).
+#[pyfunction]
+#[pyo3(signature = (doc_addr, index, scale_x, scale_y, clip=None, rotated=true, alpha=false, grayscale=false, annots=true, antialias=true, background=0xFFFF_FFFF, timeout=None))]
+#[allow(clippy::too_many_arguments)]
+fn render_page<'py>(
+    py: Python<'py>,
+    doc_addr: usize,
+    index: i32,
+    scale_x: f64,
+    scale_y: f64,
+    clip: Option<(f64, f64, f64, f64)>,
+    rotated: bool,
+    alpha: bool,
+    grayscale: bool,
+    annots: bool,
+    antialias: bool,
+    background: u32,
+    timeout: Option<f64>,
+) -> PyResult<(i32, i32, usize, Bound<'py, PyBytes>)> {
+    let p = pdfium()?;
+    let o = pdfwords_core::RenderOptions {
+        scale: (scale_x, scale_y),
+        clip: clip.map(|c| [c.0, c.1, c.2, c.3]),
+        rotated,
+        alpha,
+        grayscale,
+        annots,
+        antialias,
+        background,
+        timeout: timeout.map(std::time::Duration::from_secs_f64),
+    };
+    let (g, buf) =
+        unsafe { pdfwords_core::render_page(p, doc_addr as *mut std::ffi::c_void, index, &o) }
+            .map_err(PyRuntimeError::new_err)?;
+    Ok((g.w, g.h, g.channels, PyBytes::new(py, &buf)))
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(init, m)?)?;
     m.add_function(wrap_pyfunction!(load_page, m)?)?;
     m.add_function(wrap_pyfunction!(bench_page, m)?)?;
+    m.add_function(wrap_pyfunction!(render_page, m)?)?;
     m.add_class::<RsPage>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())

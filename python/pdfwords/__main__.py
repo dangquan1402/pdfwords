@@ -9,6 +9,8 @@
     pdfwords links | annots | toc | quality file.pdf [--pages ...]
     pdfwords search file.pdf "needle" [--regex] [--quads]
     pdfwords pdftext file.pdf [--json] [--sort] [--keep_hyphens] [--page_range 0,5-10] ...
+    pdfwords render file.pdf [--pages 0,2-4] [--dpi 150] [--fmt jpeg|png|webp] [--out-dir out/] [--workers 8]
+    pdfwords render file.pdf --pages 0 --overlay words,blocks -o debug.png
 """
 import argparse
 import json
@@ -17,7 +19,7 @@ import sys
 import pdfwords
 
 SUBCOMMANDS = ("extract", "redact", "insert-text", "contents", "debug", "links", "annots", "toc", "quality",
-               "search", "pdftext")
+               "search", "pdftext", "render")
 
 
 def _pages(spec, n):
@@ -200,6 +202,71 @@ def debug(argv):
     _out(json.dumps({"output": out, "legend": legend([s for s in a.show.split(",") if s])}))
 
 
+def render(argv):
+    import os
+    ap = argparse.ArgumentParser(prog="pdfwords render", description="render pages to images with PDFium")
+    ap.add_argument("pdf")
+    ap.add_argument("--pages", help="0-based, e.g. 0,2-4 (default: all)")
+    res = ap.add_mutually_exclusive_group()
+    res.add_argument("--dpi", type=float, default=None, help="resolution (default 150)")
+    res.add_argument("--scale", type=float, default=None, help="pixels per point (dpi / 72)")
+    res.add_argument("--max-side", type=int, default=None, help="fit the longest side to this many pixels")
+    res.add_argument("--size", default=None, help="WxH pixels; W or H may be empty to keep the aspect ratio")
+    ap.add_argument("--fmt", default="jpeg", choices=["jpeg", "png", "webp", "tiff", "bmp", "ppm"])
+    ap.add_argument("--quality", type=int, default=90, help="JPEG/WebP quality")
+    ap.add_argument("--out-dir", default=None, help="directory for the images (default: next to the PDF)")
+    ap.add_argument("--name", default="{stem}-{page:04d}.{ext}", help="file name pattern ({stem} {page} {page1} {ext})")
+    ap.add_argument("--workers", type=int, default=None, help="render in N processes")
+    ap.add_argument("--gray", action="store_true", help="8-bit grayscale (about 2x faster)")
+    ap.add_argument("--alpha", action="store_true", help="transparent background (png/webp/tiff)")
+    ap.add_argument("--no-annots", action="store_true", help="do not draw annotations")
+    ap.add_argument("--no-forms", action="store_true", help="do not draw form field values")
+    ap.add_argument("--no-antialias", action="store_true", help="crisp, non-smoothed rendering")
+    ap.add_argument("--unrotated", action="store_true", help="ignore /Rotate (match unrotated text coordinates)")
+    ap.add_argument("--clip", default=None, help="x0,y0,x1,y1 in points (top-left origin)")
+    ap.add_argument("--timeout", type=float, default=None, help="seconds per page")
+    ap.add_argument("--password")
+    ap.add_argument("--overlay", default=None, help="draw extraction layers, e.g. words,blocks,order,links")
+    ap.add_argument("-o", "--out", default=None, help="output file for a single page (--overlay or one page)")
+    a = ap.parse_args(argv)
+    kw = dict(grayscale=a.gray, alpha=a.alpha, annots=not a.no_annots, forms=not a.no_forms,
+              antialias=not a.no_antialias, rotated=not a.unrotated, timeout=a.timeout)
+    if a.clip:
+        kw["clip"] = _floats(a.clip, 4)
+    if a.scale:
+        kw["scale"] = a.scale
+    elif a.max_side:
+        kw["max_side"] = a.max_side
+    elif a.size:
+        w, _, h = a.size.lower().partition("x")
+        kw["size"] = (int(w) if w else None, int(h) if h else None)
+    dpi = a.dpi if a.dpi or kw.keys() & {"scale", "max_side", "size"} else 150
+    with pdfwords.open(a.pdf, a.password) as doc:
+        pages = _pages(a.pages, len(doc))
+        if a.overlay or a.out:
+            if len(pages) != 1:
+                raise SystemExit("--overlay / -o render a single page: pass --pages N")
+            page = doc[pages[0]]
+            out = a.out or f"{os.path.splitext(a.pdf)[0]}-p{pages[0]}.{'png' if a.overlay else a.fmt}"
+            if a.overlay:
+                from pdfwords.debug import overlay
+                if a.unrotated or a.clip:
+                    raise SystemExit("--overlay draws on the displayed, unclipped page")
+                rkw = {k: v for k, v in kw.items() if k in ("grayscale", "annots", "forms", "antialias", "timeout")}
+                img = overlay(page, show=a.overlay, scale=dpi / 72.0 if dpi else 2.0, **rkw)
+                img.save(out)
+            else:
+                ext = os.path.splitext(out)[1].lstrip(".").lower() or a.fmt
+                with open(out, "wb") as f:
+                    f.write(page.render(dpi, output=ext, quality=a.quality, **kw))
+            _out(json.dumps({"output": out}))
+            return
+        out_dir = a.out_dir or (os.path.dirname(os.path.abspath(a.pdf)))
+        paths = doc.to_images(pages, dpi, workers=a.workers, fmt=a.fmt, quality=a.quality, out_dir=out_dir,
+                              name=a.name, **kw)
+    _out(json.dumps({"outputs": paths}, ensure_ascii=False))
+
+
 def _per_page(argv, prog, fn, extra=None):
     ap = argparse.ArgumentParser(prog=f"pdfwords {prog}")
     ap.add_argument("pdf")
@@ -295,7 +362,7 @@ def main(argv=None):
         cmd, rest = argv[0], argv[1:]
         return {"extract": extract, "redact": redact, "insert-text": insert_text, "contents": contents,
                 "debug": debug, "links": links, "annots": annots, "toc": toc, "quality": quality,
-                "search": search, "pdftext": pdftext_cli}[cmd](rest)
+                "search": search, "pdftext": pdftext_cli, "render": render}[cmd](rest)
     return extract(argv)
 
 

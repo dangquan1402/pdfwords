@@ -153,8 +153,12 @@ pub struct PageGlyphs {
     pub timings: Timings,
 }
 
-/// CropBox -> MediaBox -> page bounding box -> US Letter.  Returns (l, b, r, t).
-unsafe fn crop_box(p: &Pdfium, page: FPDF_PAGE) -> (f64, f64, f64, f64) {
+/// Page box used for coordinates: CropBox -> MediaBox -> page bounding box -> US Letter.
+/// Returns (l, b, r, t).
+///
+/// # Safety
+/// `page` must be a valid page handle of `p`.
+pub unsafe fn page_box(p: &Pdfium, page: FPDF_PAGE) -> (f64, f64, f64, f64) {
     let (mut l, mut b, mut r, mut t) = (0f32, 0f32, 0f32, 0f32);
     if (p.FPDFPage_GetCropBox)(page, &mut l, &mut b, &mut r, &mut t) != 0
         || (p.FPDFPage_GetMediaBox)(page, &mut l, &mut b, &mut r, &mut t) != 0
@@ -239,7 +243,7 @@ pub unsafe fn glyphs_from_textpage(
     tp: FPDF_TEXTPAGE,
     ligatures: bool,
 ) -> PageGlyphs {
-    let (l, b, r, t) = crop_box(p, page);
+    let (l, b, r, t) = page_box(p, page);
     let (ox, oy) = (l, t);
     let width = (r - l).abs();
     let height = (t - b).abs();

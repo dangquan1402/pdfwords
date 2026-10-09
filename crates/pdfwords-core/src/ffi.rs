@@ -14,6 +14,15 @@ pub type FPDF_PAGE = *mut c_void;
 pub type FPDF_TEXTPAGE = *mut c_void;
 pub type FPDF_PAGEOBJECT = *mut c_void;
 pub type FPDF_FONT = *mut c_void;
+pub type FPDF_BITMAP = *mut c_void;
+
+/// Progressive-render pause callback (`IFSDK_PAUSE`).
+#[repr(C)]
+pub struct IFSDK_PAUSE {
+    pub version: c_int,
+    pub NeedToPauseNow: Option<unsafe extern "C" fn(*mut IFSDK_PAUSE) -> c_int>,
+    pub user: *mut c_void,
+}
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -91,6 +100,13 @@ pdfium_api! {
     FPDFFont_GetDescent: fn(FPDF_FONT, c_float, *mut c_float) -> c_int;
     FPDFFont_GetItalicAngle: fn(FPDF_FONT, *mut c_int) -> c_int;
     FPDFFont_GetIsEmbedded: fn(FPDF_FONT) -> c_int;
+    FPDFBitmap_CreateEx: fn(c_int, c_int, c_int, *mut c_void, c_int) -> FPDF_BITMAP;
+    FPDFBitmap_Destroy: fn(FPDF_BITMAP);
+    FPDFBitmap_FillRect: fn(FPDF_BITMAP, c_int, c_int, c_int, c_int, c_ulong) -> c_int;
+    FPDF_RenderPageBitmap: fn(FPDF_BITMAP, FPDF_PAGE, c_int, c_int, c_int, c_int, c_int, c_int);
+    FPDF_RenderPageBitmap_Start: fn(FPDF_BITMAP, FPDF_PAGE, c_int, c_int, c_int, c_int, c_int, c_int, *mut IFSDK_PAUSE) -> c_int;
+    FPDF_RenderPage_Continue: fn(FPDF_PAGE, *mut IFSDK_PAUSE) -> c_int;
+    FPDF_RenderPage_Close: fn(FPDF_PAGE);
 }
 
 // PDFium handles are plain pointers; the library itself is process-global.

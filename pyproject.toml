@@ -36,6 +36,8 @@ numpy = ["numpy"]
 edit = ["pypdf>=5.1", "fonttools>=4.40", "pillow>=9"]
 # visual debugging overlays (pdfwords debug / pdfwords.debug.overlay)
 debug = ["pillow>=9"]
+# rendering to numpy arrays / PIL images / encoded files (Page.render, to_images, compat.pdf2image)
+render = ["numpy", "pillow>=9"]
 # pymupdf (AGPL) is only used by the optional accuracy tests/benchmarks, never at runtime
 test = ["pytest>=7", "numpy", "pypdf>=5.1", "fonttools>=4.40", "pillow>=9"]
 compare = ["pymupdf", "pdftext"]
