@@ -333,25 +333,29 @@ class Page:
         return pt, rc
 
     def get_text(self, option="text", *, sort=False, clip=True, rotated=False,
-                 ligatures=False, dehyphenate=False, delimiters=None):
+                 ligatures=False, dehyphenate=False, delimiters=None, extended=False):
         """option: text | words | blocks | dict | rawdict | json | rawjson.
         sort: False (content order) | True (PyMuPDF-style y/x) | "xycut" (column-aware).
         ligatures: False (default) -> ligature glyphs come out as plain letters ("fi"), the first
             letter carrying the glyph box and the rest zero-width (as PyMuPDF does for multi-codepoint
             ToUnicode); True -> re-compose them into U+FB00..FB06 single chars.
-        dehyphenate: join words broken by a line-end hyphen (text/words/blocks)."""
+        dehyphenate: join words broken by a line-end hyphen (text/words/blocks).
+        extended: dict/rawdict only - spans also carry "weight" (font weight) and "pdf_flags"
+            (font descriptor flags), rawdict chars carry "idx" (PDFium char index, i.e. content
+            stream order; -1 for inserted spaces)."""
         option = option.lower()
         if self._rust:
             srt = "xycut" if sort == "xycut" else ("simple" if sort else "none")
             if option in ("json", "rawjson"):
-                d = self._rs(ligatures).get_text(option[:-4] + "dict", srt, self._clip(clip), rotated, dehyphenate, delimiters)
+                d = self._rs(ligatures).get_text(option[:-4] + "dict", srt, self._clip(clip), rotated, dehyphenate,
+                                                 delimiters, extended)
                 return _json.dumps(d, ensure_ascii=False)
-            return self._rs(ligatures).get_text(option, srt, self._clip(clip), rotated, dehyphenate, delimiters)
+            return self._rs(ligatures).get_text(option, srt, self._clip(clip), rotated, dehyphenate, delimiters, extended)
         blocks = self._blocks(sort=sort, clip=clip, ligatures=ligatures)
         pt, rc = self._xf(rotated)
         lig = lambda s: s  # noqa: E731
         if option in ("dict", "rawdict", "json", "rawjson"):
-            d = self._dict(blocks, raw=option.startswith("raw"), pt=pt, rc=rc, lig=lig, rotated=rotated)
+            d = self._dict(blocks, raw=option.startswith("raw"), pt=pt, rc=rc, lig=lig, rotated=rotated, ext=extended)
             return _json.dumps(d, ensure_ascii=False) if option.endswith("json") else d
         if option == "words":
             return self._words(blocks, rc, lig, dehyphenate, delimiters)
@@ -516,7 +520,7 @@ class Page:
             out = merged
         return [tuple(w) for w in out]
 
-    def _dict(self, blocks, raw, pt, rc, lig, rotated):
+    def _dict(self, blocks, raw, pt, rc, lig, rotated, ext=False):
         x0, y0, x1, y1 = self.rect if rotated else (0, 0, self._w, self._h)
         res = {"width": x1, "height": y1, "blocks": []}
         for b in blocks:
@@ -529,9 +533,15 @@ class Page:
                          "char_flags": 16 if not any(c.synthetic for c in sp["chars"]) else 0,
                          "font": f.name, "color": sp["color"], "alpha": 255,
                          "ascender": f.ascender, "descender": f.descender}
+                    if ext:
+                        s["weight"], s["pdf_flags"] = f.weight, f.pdf_flags
                     if raw:
-                        s["chars"] = [{"origin": pt(c.origin), "bbox": rc(c.bbox), "c": c.c, "synthetic": c.synthetic}
-                                      for c in sp["chars"]]
+                        if ext:
+                            s["chars"] = [{"origin": pt(c.origin), "bbox": rc(c.bbox), "c": c.c, "synthetic": c.synthetic,
+                                           "idx": c.idx} for c in sp["chars"]]
+                        else:
+                            s["chars"] = [{"origin": pt(c.origin), "bbox": rc(c.bbox), "c": c.c, "synthetic": c.synthetic}
+                                          for c in sp["chars"]]
                     else:
                         s["text"] = lig("".join(c.c for c in sp["chars"]))
                     s["origin"] = pt(sp["chars"][0].origin)

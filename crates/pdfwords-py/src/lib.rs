@@ -99,7 +99,7 @@ impl RsPage {
     }
 
     /// Same contract as pdfwords.Page.get_text for option in text|words|blocks|dict|rawdict.
-    #[pyo3(signature = (option="text", sort=None, clip=None, rotated=false, dehyphenate=false, delimiters=None))]
+    #[pyo3(signature = (option="text", sort=None, clip=None, rotated=false, dehyphenate=false, delimiters=None, extended=false))]
     #[allow(clippy::too_many_arguments)]
     fn get_text<'py>(
         &self,
@@ -110,6 +110,7 @@ impl RsPage {
         rotated: bool,
         dehyphenate: bool,
         delimiters: Option<String>,
+        extended: bool,
     ) -> PyResult<PyObject> {
         let sort = match sort {
             Some(s) => parse_sort(&s)?,
@@ -178,6 +179,7 @@ impl RsPage {
                     option.eq_ignore_ascii_case("rawdict"),
                     xf,
                     rotated,
+                    extended,
                 )?
                 .into_any()
                 .unbind()),
@@ -230,6 +232,7 @@ impl RsPage {
         raw: bool,
         xf: Xf,
         rotated: bool,
+        extended: bool,
     ) -> PyResult<Bound<'py, PyDict>> {
         let fonts = &self.pg.fonts;
         let (w, h) = if rotated && (self.pg.rotation == 90 || self.pg.rotation == 270) {
@@ -267,6 +270,10 @@ impl RsPage {
                     d.set_item(k("alpha"), 255)?;
                     d.set_item(k("ascender"), f.ascender)?;
                     d.set_item(k("descender"), f.descender)?;
+                    if extended {
+                        d.set_item(k("weight"), f.weight)?;
+                        d.set_item(k("pdf_flags"), f.pdf_flags)?;
+                    }
                     if raw {
                         let cl = PyList::empty(py);
                         for c in chars {
@@ -276,6 +283,9 @@ impl RsPage {
                             let mut buf = [0u8; 4];
                             cd.set_item(k("c"), c.c.encode_utf8(&mut buf) as &str)?;
                             cd.set_item(k("synthetic"), c.synthetic)?;
+                            if extended {
+                                cd.set_item(k("idx"), c.idx)?;
+                            }
                             cl.append(cd)?;
                         }
                         d.set_item(k("chars"), cl)?;
