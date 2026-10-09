@@ -12,7 +12,8 @@ pytestmark = pytest.mark.skipif("rust" not in pdfwords.available_backends(), rea
 NAMES = ["simple_text.pdf", "rot90.pdf", "irs_w9.pdf", "synthetic.pdf"] + list(fetch_test_pdfs.REMOTE)
 MODES = ["words", "blocks", "text", "dict", "rawdict", "rawjson"]
 VARIANTS = [{}, {"sort": True}, {"sort": "xycut"}, {"rotated": True}, {"ligatures": True},
-            {"dehyphenate": True}, {"clip": False}, {"clip": (50, 50, 300, 400)}, {"delimiters": ".,"}]
+            {"dehyphenate": True}, {"clip": False}, {"clip": (50, 50, 300, 400)}, {"delimiters": ".,"},
+            {"extended": True}, {"extended": True, "ligatures": True, "rotated": True}]
 
 
 @pytest.mark.parametrize("name", NAMES)

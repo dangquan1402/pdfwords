@@ -63,6 +63,8 @@ pub struct Char {
     pub color: u32,
     pub synthetic: bool,
     pub bidi: u8,
+    /// PDFium char index (content-stream order); -1 for inserted spaces
+    pub idx: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -225,6 +227,7 @@ pub fn build_blocks(pg: &PageGlyphs, clip: Option<BBox>, params: &LayoutParams) 
                 color: g.color,
                 synthetic: false,
                 bidi,
+                idx: g.idx,
             });
             last_c = Some(g.c);
             continue;
@@ -324,6 +327,7 @@ pub fn build_blocks(pg: &PageGlyphs, clip: Option<BBox>, params: &LayoutParams) 
                 color: g.color,
                 synthetic: true,
                 bidi,
+                idx: -1,
             });
         }
         line.chars.push(Char {
@@ -336,6 +340,7 @@ pub fn build_blocks(pg: &PageGlyphs, clip: Option<BBox>, params: &LayoutParams) 
             color: g.color,
             synthetic: false,
             bidi,
+            idx: g.idx,
         });
         last_c = Some(g.c);
         last_bidi = bidi;

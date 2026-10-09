@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 import re
-from ctypes import c_double, c_float, c_uint, c_ulong, create_string_buffer, byref
+from ctypes import c_double, c_float, c_uint, create_string_buffer, byref
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as R
@@ -88,12 +88,23 @@ class FontInfo:
         return flags
 
 
-def _font_info(textobj, cache):
+def _font_info(textobj, cache, textpage=None, i=0):
     font = R.FPDFTextObj_GetFont(textobj)
     key = R.ctypes.cast(font, R.ctypes.c_void_p).value if font else None
     fi = cache.get(key)
     if fi is not None:
         return fi
+    fi = _font_info_new(font)
+    if textpage is not None:
+        # the flags PDFium reports for text (descriptor flags plus internal bits, as pdftext has them)
+        tf = R.ctypes.c_int()
+        if R.FPDFText_GetFontInfo(textpage, i, None, 0, byref(tf)) > 0:
+            fi.pdf_flags = tf.value
+    cache[key] = fi
+    return fi
+
+
+def _font_info_new(font):
     name = ""
     flags = weight = 0
     asc = 0.8
@@ -118,9 +129,7 @@ def _font_info(textobj, cache):
         iav = R.ctypes.c_int()
         if R.FPDFFont_GetItalicAngle(font, byref(iav)):
             ia = iav.value
-    fi = FontInfo(name, flags, weight, asc, dsc, ia, emb)
-    cache[key] = fi
-    return fi
+    return FontInfo(name, flags, weight, asc, dsc, ia, emb)
 
 
 def _fast(fn, restype, *argtypes):
@@ -197,7 +206,7 @@ def page_glyphs(page: pdfium.PdfPage, textpage: pdfium.PdfTextPage, ligatures: b
                 pobj = R.ctypes.cast(obj, R.FPDF_PAGEOBJECT)
                 R.FPDFTextObj_GetFontSize(pobj, fsz)
                 tf = fsz.value
-                fi = _font_info(pobj, font_cache)
+                fi = _font_info(pobj, font_cache, raw, i)
             else:
                 tf = R.FPDFText_GetFontSize(raw, i)
                 fi = FontInfo("", 0, 400, 0.8, -0.2, 0)

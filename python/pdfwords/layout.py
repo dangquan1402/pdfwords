@@ -52,12 +52,12 @@ def _is_rtl(ch):
 
 
 class Char:
-    __slots__ = ("c", "origin", "bbox", "size", "font", "color", "synthetic", "bidi")
+    __slots__ = ("c", "origin", "bbox", "size", "font", "color", "synthetic", "bidi", "idx")
 
-    def __init__(self, c, origin, bbox, size, font, color, synthetic=False, bidi=0):
+    def __init__(self, c, origin, bbox, size, font, color, synthetic=False, bidi=0, idx=-1):
         self.c, self.origin, self.bbox = c, origin, bbox
         self.size, self.font, self.color = size, font, color
-        self.synthetic, self.bidi = synthetic, bidi
+        self.synthetic, self.bidi, self.idx = synthetic, bidi, idx
 
 
 class Line:
@@ -129,7 +129,7 @@ def build_blocks(glyphs, clip=None, params=None):
             # zero-width box at the current pen, pen does not move
             if g.cont and pen is not None:
                 box = _char_box(pen[0], pen[1], pen[0], pen[1], g.dx, g.dy, g.size, g.font)
-            line.chars.append(Char(g.c, pen if g.cont and pen else (g.px, g.py), box, g.size, g.font, g.color, False, bidi))
+            line.chars.append(Char(g.c, pen if g.cont and pen else (g.px, g.py), box, g.size, g.font, g.color, False, bidi, g.idx))
             last_c = g.c
             continue
 
@@ -190,7 +190,7 @@ def build_blocks(glyphs, clip=None, params=None):
         if insert_space and g.c != " ":
             sb = _char_box(pen[0], pen[1], g.px, g.py, g.dx, g.dy, g.size, g.font)
             line.chars.append(Char(" ", pen, sb, g.size, g.font, g.color, True, bidi))
-        line.chars.append(Char(g.c, (g.px, g.py), box, g.size, g.font, g.color, False, bidi))
+        line.chars.append(Char(g.c, (g.px, g.py), box, g.size, g.font, g.color, False, bidi, g.idx))
         last_c, last_bidi = g.c, bidi
         prev_origin = (g.px, g.py)
         pen = (g.qx, g.qy)

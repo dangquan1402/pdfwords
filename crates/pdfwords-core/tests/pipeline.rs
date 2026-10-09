@@ -16,6 +16,7 @@ fn ch(c: char, x0: f64, y0: f64, x1: f64, y1: f64) -> Char {
         color: 0,
         synthetic: false,
         bidi: 0,
+        idx: 0,
     }
 }
 
