@@ -30,5 +30,11 @@ Test fixtures (tests/fixtures/):
 Other test documents are downloaded from their original sources by tools/fetch_test_pdfs.py and
 are not redistributed.
 
+pdfwords.compat.pdftext reproduces the public API and output schema of pdftext
+(https://github.com/datalab-to/pdftext, Copyright Vik Paruchuri, Apache-2.0). It is an
+independent implementation on pdfwords' engine; no pdftext code is included.
+
+Optional visual debugging (the "debug" extra) uses Pillow (MIT-CMU / HPND) when installed.
+
 The output format is designed to be compatible with PyMuPDF's Page.get_text(). pdfwords is not
 affiliated with Artifex Software or the PyMuPDF project and contains no MuPDF/PyMuPDF code.
