@@ -131,3 +131,125 @@ def tagged_pdf():
     objs[31] = _stream(content)
     objs[32] = (b"<< /Nums [0 [8 0 R 9 0 R 10 0 R 12 0 R 13 0 R 17 0 R 18 0 R 19 0 R 20 0 R 21 0 R]] >>")
     return _pdf([objs[i] for i in range(1, 33)])
+
+
+def tables_pdf():
+    """Page 1: a ruled 4x3 grid whose header cell "Savings" spans two columns, and a
+    rule-delimited ("booktabs") 3-column table; page 2: prose between two rules (no table)."""
+    def t(x, y, s, font=b"/F1 10 Tf"):
+        return b"BT " + font + b" %g %g Td (%s) Tj ET\n" % (x, y, s)
+    g = b"0.5 w "
+    # grid: x = 72, 172, 272, 372 ; y = 700, 680, 660, 640, 620
+    for y in (700, 680, 660, 640, 620):
+        g += b"72 %d m 372 %d l S " % (y, y)
+    g += b"72 620 m 72 700 l S 172 620 m 172 700 l S 372 620 m 372 700 l S 272 620 m 272 680 l S\n"
+    p1 = g
+    p1 += t(80, 686, b"Name") + t(240, 686, b"Savings")
+    p1 += t(180, 666, b"Speed") + t(280, 666, b"Idle")
+    for i, (a, b_, c) in enumerate([(b"alpha", b"5.9%", b"17.4%"), (b"beta", b"2.4%", b"2.7%")]):
+        y = 646 - 20 * i
+        p1 += t(80, y, a) + t(180, y, b_) + t(280, y, c)
+    # booktabs: rules at 500, 482, 420 (pt), columns at 80 / 200 / 300
+    p1 += b"1 w 72 500 m 372 500 l S 0.5 w 72 482 m 372 482 l S 1 w 72 420 m 372 420 l S\n"
+    p1 += t(80, 488, b"Model") + t(200, 488, b"BLEU") + t(300, 488, b"Cost")
+    for i, (a, b_, c) in enumerate([(b"ByteNet", b"23.75", b"1.0e20"), (b"GNMT + RL", b"24.6", b"2.3e19"),
+                                    (b"Transformer", b"28.4", b"2.3e19")]):
+        y = 468 - 16 * i
+        p1 += t(80, y, a) + t(200, y, b_) + t(300, y, c)
+    p2 = b"0.5 w 72 700 m 540 700 l S 72 600 m 540 600 l S\n"
+    for i, line in enumerate([b"This is ordinary prose between two horizontal rules, set in one",
+                              b"column with normal word spacing, which must not be detected as",
+                              b"a table even though the lines start at the same position and",
+                              b"the rules above and below have the same extent."]):
+        p2 += t(72, 680 - 14 * i, line)
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> "
+            b"/Contents 4 0 R >>",
+            _stream(p1),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> "
+            b"/Contents 6 0 R >>",
+            _stream(p2),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"]
+    return _pdf(objs)
+
+
+def rtl_pdf():
+    """Hebrew/Latin/digit lines drawn in VISUAL order (left to right), as many producers do,
+    with a Type3 font whose ToUnicode maps codes to the characters. Logical texts:
+    1 "שלום עולם" (RTL), 2 "פרק 2 ראשון" (RTL + number), 3 "abc שלום def" (LTR + RTL word),
+    4 "(שלום)" (RTL + mirrored brackets)."""
+    alphabet = "שלוםערקפאןנabcdef0123456789 ()"
+    code = {ch: 0x21 + i for i, ch in enumerate(alphabet)}
+    visual = ["םלוע םולש", "ןושאר 2 קרפ", "abc םולש def", "(םולש)"]
+    content = b""
+    for i, line in enumerate(visual):
+        s = bytes(code[c] for c in line)
+        esc = s.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
+        content += b"BT /T3 12 Tf 72 %d Td (" % (700 - 30 * i) + esc + b") Tj ET\n"
+    first, last = 0x21, 0x21 + len(alphabet) - 1
+    procs = b" ".join(b"/g%d %d 0 R" % (i, 7 + i) for i in range(len(alphabet)))
+    diffs = b" ".join(b"/g%d" % i for i in range(len(alphabet)))
+    cmap = (b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /T3 def "
+            b"1 begincodespacerange <00> <FF> endcodespacerange %d beginbfchar\n" % len(alphabet))
+    for ch, c in code.items():
+        cmap += b"<%02X> <%04X>\n" % (c, ord(ch))
+    cmap += b"endbfchar endcmap CMapName currentdict /CMap defineresource pop end end"
+    widths = b" ".join(b"600" if ch != " " else b"300" for ch in alphabet)
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /T3 5 0 R >> >> "
+        b"/Contents 4 0 R >>",
+        _stream(content),
+        b"<< /Type /Font /Subtype /Type3 /FontBBox [0 0 600 700] /FontMatrix [0.001 0 0 0.001 0 0] "
+        b"/CharProcs << " + procs + b" >> /Encoding << /Type /Encoding /Differences [%d " % first + diffs
+        + b"] >> /FirstChar %d /LastChar %d /Widths [" % (first, last) + widths + b"] /ToUnicode 6 0 R "
+        b"/Resources << >> >>",
+        _stream(cmap),
+    ]
+    for ch in alphabet:
+        w = 300 if ch == " " else 600
+        glyph = b"%d 0 0 0 %d 700 d1" % (w, w) + (b"" if ch == " " else b" 50 0 500 700 re f")
+        objs.append(_stream(glyph))
+    return _pdf(objs)
+
+
+def vertical_cjk_pdf(cols=("縦書きの文章", "二行目です。"), horiz=("横書きの行", "次")):
+    """Japanese vertical writing: a Type0 font with /Identity-V (non-embedded Adobe-Japan1 CID font,
+    default vertical metrics DW2 [880 -1000]) drawing two columns right to left, plus a horizontal
+    (/Identity-H) two-line paragraph whose second line is a single glyph."""
+    chars = sorted(set("".join(cols) + "".join(horiz)))
+    cid = {c: i + 1 for i, c in enumerate(chars)}
+
+    def hexs(t):
+        return b"".join(b"%04X" % cid[c] for c in t)
+
+    content = b""
+    x = 400
+    for col in cols:
+        content += b"BT /V 20 Tf %d 700 Td <" % x + hexs(col) + b"> Tj ET\n"
+        x -= 30
+    content += b"BT /H 20 Tf 72 300 Td <" + hexs(horiz[0]) + b"> Tj 0 -26 Td <" + hexs(horiz[1]) + b"> Tj ET\n"
+    cmap = (b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /U def "
+            b"1 begincodespacerange <0000> <FFFF> endcodespacerange %d beginbfchar\n" % len(chars))
+    for c, i in cid.items():
+        cmap += b"<%04X> <%04X>\n" % (i, ord(c))
+    cmap += b"endbfchar endcmap CMapName currentdict /CMap defineresource pop end end"
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /V 5 0 R /H 9 0 R >> >> "
+        b"/Contents 4 0 R >>",
+        _stream(content),
+        b"<< /Type /Font /Subtype /Type0 /BaseFont /HeiseiMin-W3 /Encoding /Identity-V /DescendantFonts [6 0 R] "
+        b"/ToUnicode 7 0 R >>",
+        b"<< /Type /Font /Subtype /CIDFontType0 /BaseFont /HeiseiMin-W3 /CIDSystemInfo << /Registry (Adobe) "
+        b"/Ordering (Japan1) /Supplement 2 >> /FontDescriptor 8 0 R /DW 1000 /DW2 [880 -1000] >>",
+        _stream(cmap),
+        b"<< /Type /FontDescriptor /FontName /HeiseiMin-W3 /Flags 4 /FontBBox [0 -141 1000 859] /ItalicAngle 0 "
+        b"/Ascent 859 /Descent -141 /CapHeight 700 /StemV 80 >>",
+        b"<< /Type /Font /Subtype /Type0 /BaseFont /HeiseiMin-W3 /Encoding /Identity-H /DescendantFonts [6 0 R] "
+        b"/ToUnicode 7 0 R >>",
+    ]
+    return _pdf(objs)

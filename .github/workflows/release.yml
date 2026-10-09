@@ -24,8 +24,8 @@ jobs:
       matrix:
         target: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - uses: PyO3/maturin-action@v1
@@ -39,7 +39,7 @@ jobs:
         run: |
           pip install dist/*.whl
           cd /tmp && python -c "import pdfwords; assert pdfwords.available_backends() == ['rust', 'python'], pdfwords.available_backends()"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-linux-${{ matrix.target }}
           path: dist
@@ -51,8 +51,8 @@ jobs:
       matrix:
         target: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - uses: PyO3/maturin-action@v1
@@ -65,7 +65,7 @@ jobs:
         run: |
           pip install dist/*.whl
           cd /tmp && python -c "import pdfwords; assert pdfwords.available_backends() == ['rust', 'python'], pdfwords.available_backends()"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-macos-${{ matrix.target }}
           path: dist
@@ -74,8 +74,8 @@ jobs:
     name: Wheel windows-x64
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           architecture: x64
@@ -89,7 +89,7 @@ jobs:
         run: |
           pip install dist/*.whl
           cd "$RUNNER_TEMP" && python -c "import pdfwords; assert pdfwords.available_backends() == ['rust', 'python'], pdfwords.available_backends()"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-windows-x64
           path: dist
@@ -98,12 +98,12 @@ jobs:
     name: Source distribution
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: PyO3/maturin-action@v1
         with:
           command: sdist
           args: --out dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist
@@ -120,7 +120,7 @@ jobs:
       id-token: write   # trusted publishing
       contents: write   # attach files to the GitHub release
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: "*"
           merge-multiple: true
@@ -129,7 +129,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true

@@ -4,14 +4,14 @@ build-backend = "maturin"
 
 [project]
 name = "pdfwords"
-version = "0.3.0"
+version = "0.4.0"
 description = "PyMuPDF-compatible text extraction with char/word/line/block bounding boxes, built on PDFium. Apache-2.0, optional Rust core."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Quan Dang" }]
 requires-python = ">=3.9"
 dependencies = ["pypdfium2>=4.30"]
-keywords = ["pdf", "text-extraction", "bounding-box", "pdfium", "pymupdf", "ocr", "layout", "markdown", "rag", "llm", "pdf2image"]
+keywords = ["pdf", "text-extraction", "bounding-box", "pdfium", "pymupdf", "ocr", "layout", "markdown", "rag", "llm", "pdf2image", "tables", "parquet", "rtl", "cjk"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -42,6 +42,13 @@ render = ["numpy", "pillow>=9"]
 langchain = ["langchain-core>=0.2"]
 llamaindex = ["llama-index-core>=0.10"]
 mcp = ["mcp>=1.2"]
+# OCR fallback (Apache-2.0): Tesseract via pytesseract (needs the tesseract binary) or RapidOCR;
+# rendering for OCR needs numpy + Pillow
+ocr = ["pytesseract>=0.3.10", "numpy", "pillow>=9"]
+ocr-rapid = ["rapidocr_onnxruntime>=1.3", "numpy", "pillow>=9"]
+# Table.to_pandas / doc.to_pandas (BSD-3) and Arrow / Parquet output (Apache-2.0)
+tables = ["pandas>=1.3"]
+arrow = ["pyarrow>=10"]
 # pymupdf (AGPL) is only used by the optional accuracy tests/benchmarks, never at runtime
 test = ["pytest>=7", "numpy", "pypdf>=5.1", "fonttools>=4.40", "pillow>=9"]
 compare = ["pymupdf", "pdftext"]

@@ -6,6 +6,50 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - not yet released (version bumped in-tree; no tag or PyPI release)
+
+### Added
+- **Table detection** (`docs/TABLES.md`): `page.find_tables(clip, strategy="auto"|"lines"|"text",
+  min_rows, min_cols)` returns `Table` objects.
+  - `Table` has `bbox`, `row_count`, `col_count`, `cells` (with row/col spans and boxes),
+    `extract()`, `to_markdown()`, `to_text()`, `to_csv()`, `to_pandas()` and `to_dict()`.
+  - Detects ruled grids (spanning cells from missing rules), rule-delimited "booktabs" tables
+    (whitespace corridors) and, optionally, rule-less aligned text.
+  - Markdown export uses detected tables on untagged pages.
+  - New CLI: `pdfwords tables` (json / markdown / csv).
+- **OCR fallback with the text-layer schema** (`docs/OCR.md`):
+  - `get_text(..., ocr="auto"|True|engine|{...})`; `"auto"` runs OCR only when
+    `page.needs_ocr()` says so.
+  - `pdfwords.open(..., ocr=...)` sets a document-wide default; `page.ocr()` returns the OCR
+    rawdict.
+  - Adapters: Tesseract (pytesseract), RapidOCR, Apple Vision (ocrmac), or any callable.
+  - Results are rendered upright, mapped back through `/Rotate` and cached per page.
+  - The CLI gains `--ocr/--ocr-engine/--ocr-lang/--ocr-dpi` on extract, export and frame.
+- **Columnar output** (`pdfwords.frames`):
+  - `doc.to_arrow(kind)`, `doc.to_parquet(path, kind)`, `doc.to_pandas(kind)` and
+    `frames.records()` give one row per char, span, line, word or block, with page, ids,
+    boxes, text and style.
+  - New CLI: `pdfwords frame -o x.parquet|x.csv`.
+- **Vertical CJK writing**: glyphs stacked down a column (Identity-V fonts) become one
+  `wmode: 1` line per column, and the columns of a block read right to left. Both backends.
+- **WebAssembly feasibility spike**: `docs/WASM.md`.
+- Extras: `ocr`, `ocr-rapid`, `tables`, `arrow`.
+
+### Changed
+- **Bidi** is now UAX #9-lite in both backends:
+  - resolved levels for strong, number and neutral characters, and an LTR or RTL paragraph
+    direction;
+  - L2 reordering and L4 bracket mirroring.
+  - LTR paragraphs with embedded Hebrew/Arabic words, and RTL lines with numbers, now come out
+    in correct logical order. Previously every mixed line was treated as RTL.
+  - Digits and neutrals inside RTL lines that PDFium already delivers in logical order no
+    longer break the line.
+- GitHub Actions upgraded to their Node 24 majors:
+  - `checkout@v7`, `setup-python@v7`, `cache@v6`;
+  - `upload-artifact@v7`, `download-artifact@v8`;
+  - `action-gh-release@v3`.
+- CI now runs Tesseract and RapidOCR tests and smoke-tests the new CLIs.
+
 ## [0.3.0] - not yet released (version bumped in-tree; no tag or PyPI release)
 
 ### Added

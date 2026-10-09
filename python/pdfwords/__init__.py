@@ -28,7 +28,7 @@ from .order import sort_simple, sort_xycut
 from .render import RenderTimeout, Pixmap  # noqa: F401
 from .annots import LINK_NONE, LINK_GOTO, LINK_URI, LINK_LAUNCH, LINK_NAMED, LINK_GOTOR  # noqa: F401
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = ["open", "Document", "Page", "available_backends", "default_backend", "parallel_words", "__version__",
            "extract", "iter_pages", "RenderTimeout", "Pixmap", "convert_from_path", "convert_from_bytes", "to_markdown", "chunks", "export", "LINK_NONE", "LINK_GOTO", "LINK_URI", "LINK_LAUNCH", "LINK_NAMED", "LINK_GOTOR",
            "PDF_REDACT_IMAGE_NONE", "PDF_REDACT_IMAGE_REMOVE", "PDF_REDACT_IMAGE_PIXELS",
@@ -82,16 +82,21 @@ def default_backend():
     return available_backends()[0]
 
 
-def open(source, password=None, backend=None, flatten=False):  # noqa: A001  (mirror pymupdf.open)
+def open(source, password=None, backend=None, flatten=False, ocr=None):  # noqa: A001  (mirror pymupdf.open)
     """source: path, bytes or a binary file object.
     backend: "rust" (native core, default when the extension is built) | "python".
     flatten: render form-field values and annotation appearances into the page content before
-        extraction (PDFium FPDFPage_Flatten), so filled-in form values come out as text."""
-    return Document(source, password, backend=backend, flatten=flatten)
+        extraction (PDFium FPDFPage_Flatten), so filled-in form values come out as text.
+    ocr: default for every get_text() of the document: None/False (never), "auto" (pages that
+        need OCR), True (always), an engine name / callable, or a dict of OCR settings
+        (see pdfwords.ocr)."""
+    return Document(source, password, backend=backend, flatten=flatten, ocr=ocr)
 
 
 class Document:
-    def __init__(self, source, password=None, backend=None, flatten=False):
+    def __init__(self, source, password=None, backend=None, flatten=False, ocr=None):
+        self.ocr = ocr
+        self._ocr_cache = {}
         self.backend = backend or default_backend()
         if self.backend not in ("rust", "python"):
             raise ValueError(f"unknown backend {self.backend!r}")
@@ -288,6 +293,21 @@ class Document:
         return to_images(self, pages, dpi, workers=workers, fmt=fmt, quality=quality, out_dir=out_dir,
                          name=name, **kw)
 
+    def to_arrow(self, kind="words", pages=None, **text_kw):
+        """One row per char | span | line | word | block as a pyarrow.Table (pdfwords.frames)."""
+        from .frames import to_arrow
+        return to_arrow(self, kind, pages, **text_kw)
+
+    def to_parquet(self, path, kind="words", pages=None, **text_kw):
+        """Write char / span / line / word / block rows to Parquet (needs pyarrow)."""
+        from .frames import to_parquet
+        return to_parquet(self, path, kind, pages, **text_kw)
+
+    def to_pandas(self, kind="words", pages=None, **text_kw):
+        """One row per char | span | line | word | block as a pandas.DataFrame."""
+        from .frames import to_pandas
+        return to_pandas(self, kind, pages, **text_kw)
+
     def close(self):
         if self._fpdf is not None:
             self._fpdf.close()
@@ -416,7 +436,8 @@ class Page:
         return pt, rc
 
     def get_text(self, option="text", *, sort=False, clip=True, rotated=False,
-                 ligatures=False, dehyphenate=False, delimiters=None, extended=False, links=False, roles=False):
+                 ligatures=False, dehyphenate=False, delimiters=None, extended=False, links=False, roles=False,
+                 ocr=None):
         """option: text | words | blocks | dict | rawdict | json | rawjson.
         sort: False (content order) | True (PyMuPDF-style y/x) | "xycut" (column-aware).
         ligatures: False (default) -> ligature glyphs come out as plain letters ("fi"), the first
@@ -432,8 +453,32 @@ class Page:
         sort="struct": tagged PDFs - the structure tree's (author's) reading order; blocks are split
             where the structure element changes; untagged text keeps its xycut position.
         roles: dict/rawdict only - blocks and spans carry "role" (P, H1, LI, TD, ...; "" untagged)
-            and spans "mcid" (tagged PDFs)."""
+            and spans "mcid" (tagged PDFs).
+        ocr: None (document default, see open(ocr=)) | False | "auto" (OCR when needs_ocr()) |
+            True | engine name / callable | dict(engine, dpi, lang, min_conf, mode) - OCR results in
+            the same schema (font "OCR", span "conf"); see pdfwords.ocr."""
         option = option.lower()
+        mode, settings = (None, None)
+        if ocr is not None or self.parent.ocr is not None:
+            from .ocr import resolve
+            mode, settings = resolve(ocr if ocr is not None else self.parent.ocr)
+        if mode and option in ("text", "words", "blocks", "dict", "rawdict", "json", "rawjson") and (
+                mode == "always" or self.needs_ocr()):
+            from .ocr import page_ocr
+            d = page_ocr(self, settings, rotated, sort if sort else False)
+            cl = self._clip(clip) if clip not in (True, False, None) else None
+            if cl is not None:
+                for b in d["blocks"]:
+                    for ln in b["lines"]:
+                        for sp in ln["spans"]:
+                            sp["chars"] = [c for c in sp["chars"] if cl[0] <= (c["bbox"][0] + c["bbox"][2]) / 2 <= cl[2]
+                                           and cl[1] <= (c["bbox"][1] + c["bbox"][3]) / 2 <= cl[3]]
+                        ln["spans"] = [sp for sp in ln["spans"] if sp["chars"]]
+                    b["lines"] = [ln for ln in b["lines"] if ln["spans"]]
+                d["blocks"] = [b for b in d["blocks"] if b["lines"]]
+            if links and option in ("dict", "rawdict", "json", "rawjson"):
+                _split_link_spans(d, self._link_rects(rotated), keep_chars=True)
+            return _from_rawdict(d, option, dehyphenate, delimiters)
         if option in ("markdown", "md", "html", "xhtml", "xml", "hocr", "alto"):
             from . import exporters
             return exporters.page_export(self, option, sort=sort, clip=clip, rotated=rotated)
@@ -569,6 +614,19 @@ class Page:
         (by line, then x); a word goes to the cell covering most of it (>= min_overlap)."""
         from .tables import assign_cells
         return assign_cells(self, cells, image_size, rotated=rotated, min_overlap=min_overlap)
+
+    def ocr(self, engine="auto", dpi=300, lang=None, *, rotated=False, min_conf=0.0, sort=False, **engine_kw):
+        """OCR this page (whatever its text layer) -> rawdict in the get_text() schema. Use
+        get_text(option, ocr=...) for the other formats. See pdfwords.ocr."""
+        from .ocr import ocr_rawdict
+        return ocr_rawdict(self, engine, dpi, lang, rotated=rotated, min_conf=min_conf, sort=sort, **engine_kw)
+
+    def find_tables(self, clip=None, strategy="auto", *, rotated=False, min_rows=2, min_cols=2, text=None):
+        """Detect tables from ruling lines and text alignment (see pdfwords.table_detect).
+        Returns a list of Table (bbox, row_count, col_count, cells, extract(), to_markdown(),
+        to_csv(), to_pandas()). strategy: "auto" | "lines" | "text"."""
+        from .table_detect import find_tables
+        return find_tables(self, clip, strategy, rotated=rotated, min_rows=min_rows, min_cols=min_cols, text=text)
 
     # ------------------------------------------------------------------ images, drawings, structure
     def get_images(self, *, rotated=False, hashes=False):
