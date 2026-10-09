@@ -170,7 +170,7 @@ def paragraph(pg, rng, x0, y, width, font, size, *, indent=0.0, track=0.0, sup=T
     return y
 
 
-def make(seed=20261009):
+def make(seed=20261009, out_dir=OUT, name="synthetic"):
     rng = random.Random(seed)
     pdf = pdfium.PdfDocument.new()
     pages = []
@@ -261,13 +261,19 @@ def make(seed=20261009):
             y -= rng.uniform(1.4, 2.2) * size
         pages.append(pg.done())
 
-    os.makedirs(OUT, exist_ok=True)
-    pdf.save(os.path.join(OUT, "synthetic.pdf"))
-    with open(os.path.join(OUT, "synthetic.json"), "w") as f:
+    os.makedirs(out_dir, exist_ok=True)
+    pdf.save(os.path.join(out_dir, name + ".pdf"))
+    with open(os.path.join(out_dir, name + ".json"), "w") as f:
         json.dump({"seed": seed, "ranges": RANGES, "pages": pages}, f)
     return pages
 
 
 if __name__ == "__main__":
-    ps = make()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seed", type=int, default=20261009)
+    ap.add_argument("--out-dir", default=OUT)
+    ap.add_argument("--name", default="synthetic")
+    a = ap.parse_args()
+    ps = make(a.seed, a.out_dir, a.name)
     print(len(ps), "pages,", sum(len(p["words"]) for p in ps), "words")

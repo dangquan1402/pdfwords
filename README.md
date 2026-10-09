@@ -123,6 +123,23 @@ from pdfwords.debug import overlay
 overlay(page, show=("words", "blocks", "order")).save("p.png")   # chars words lines spans blocks order links annots widgets cells
 ```
 
+## Markdown, chunks and other LLM-ready output
+
+```python
+md = pdfwords.to_markdown("paper.pdf")            # headings, lists, tables, code, links; no running headers
+for c in pdfwords.chunks("paper.pdf", max_chars=2000):
+    c["text"], c["headings"], c["pages"], c["provenance"]   # provenance: [{"page", "bbox", "type"}]
+
+page.get_text(sort="struct")                      # tagged PDFs: the author's reading order
+page.get_text("dict", sort="struct", roles=True)  # blocks/spans with "role" (H1, P, LI, TD, ...)
+page.get_struct_tree(); page.get_images(); page.get_drawings()
+pdfwords.export("doc.pdf", "hocr", dpi=300)       # also html | xhtml | xml | alto | markdown
+```
+
+Optional extras add a LangChain loader (`pdfwords[langchain]`), a LlamaIndex reader
+(`pdfwords[llamaindex]`) and an MCP server for LLM agents (`pdfwords[mcp]`, `pdfwords mcp`).
+See [docs/LLM.md](docs/LLM.md).
+
 ## Rendering
 
 Pages are rendered by PDFium, the same engine that extracts the text, so pixels and word boxes
@@ -223,6 +240,10 @@ pdfwords search file.pdf "net income" --quads
 pdfwords pdftext file.pdf [--json] [--sort] [--keep_hyphens] [--page_range 0,5-10] [--workers N] ...
 pdfwords render file.pdf --pages 0,2-4 --dpi 150 --fmt jpeg --out-dir out/ --workers 8   # --gray --alpha --clip ...
 pdfwords render file.pdf --pages 0 --overlay words,blocks -o debug.png
+pdfwords export file.pdf -f markdown -o file.md      # html | xhtml | xml | hocr | alto
+pdfwords chunks file.pdf --max-chars 1500 > chunks.jsonl
+pdfwords objects file.pdf --kind images|drawings|struct
+pdfwords mcp --root ~/Documents                      # MCP server (stdio)
 ```
 
 ## Backends
@@ -256,6 +277,10 @@ from `benchmarks/bench_backends.py`; raw output is in `benchmarks/results/bench_
 About 75–85% of the Rust time is PDFium itself (`FPDF_LoadPage` + `FPDFText_LoadPage`).
 pdfwords' own grouping and Python object creation cost about 0.4 ms per page.
 
+Against other libraries (pdftext, PyMuPDF, pdfplumber, pdf_oxide, raw pypdfium2), including
+word F1 and reading order on held-out synthetic ground truth, see
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md) (`tools/bench_suite.py`).
+
 ## Accuracy vs PyMuPDF
 
 `benchmarks/compare_pymupdf.py` compares pdfwords with PyMuPDF on 6 documents (37 pages,
@@ -285,7 +310,9 @@ superscript detection are all 1.0, and block agreement is 0.996. See
   visual→logical reordering, not full UAX #9.
 * **Ligatures** come out decomposed by default ("fi"), because PDFium does not expose the
   original code point. `ligatures=True` re-composes U+FB00–FB06.
-* **Text blocks only.** There are no image blocks and no underline/strike-out detection yet.
+* **Text blocks only** in `get_text("dict")`: images and vector paths are available separately
+  (`get_images()`, `get_drawings()`); there is no underline/strike-out detection yet.
+* **Markdown is heuristic** for untagged PDFs (headings from the outline and font statistics).
 * **PDFium is not thread-safe.** Do not call pdfwords or pypdfium2 from several threads at once.
   The Rust backend holds the GIL for each call. Use processes for parallelism
   (`workers=` on `doc.extract()` / `iter_pages()`).
@@ -303,8 +330,8 @@ superscript detection are all 1.0, and block agreement is 0.996. See
     built with `cargo ndk`;
   * static linking of PDFium.
 * Publish `pdfwords-core` to crates.io.
-* Markdown output, table detection, image blocks, a header/footer filter.
-* An optional OCR fallback that emits the same schema.
+* Table detection for untagged PDFs, an OCR fallback with the same schema, full bidi,
+  vertical CJK, Arrow/Parquet output (0.4).
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture.
 

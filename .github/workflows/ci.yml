@@ -97,3 +97,27 @@ jobs:
           test -s rendered/irs_w9-0001.jpg
           pdfwords render tests/fixtures/irs_w9.pdf --pages 0 --overlay words,blocks -o render_overlay.png
           test -s render_overlay.png
+          pdfwords export tests/fixtures/irs_w9.pdf --pages 0-1 -o w9.md
+          grep -q "^# Form W-9" w9.md
+          pdfwords export tests/fixtures/irs_w9.pdf --pages 0 -f alto | python -c "import sys, xml.dom.minidom as m; m.parseString(sys.stdin.buffer.read())"
+          pdfwords chunks tests/fixtures/irs_w9.pdf --pages 0 | head -1 | grep -q '"provenance"'
+          pdfwords objects tests/fixtures/irs_w9.pdf --pages 0 --kind struct | grep -q '"Document"'
+      - name: LLM integrations (LangChain, LlamaIndex, MCP)
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: |
+          python -m pip install langchain-core llama-index-core mcp
+          python -m pytest -q -ra tests/test_llm.py
+          python - <<'PY'
+          import json, subprocess, sys
+          p = subprocess.Popen([sys.executable, "-m", "pdfwords", "mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+          def send(o):
+              p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
+          send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "ci", "version": "0"}}})
+          assert json.loads(p.stdout.readline())["id"] == 1
+          send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+          send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+          names = [t["name"] for t in json.loads(p.stdout.readline())["result"]["tools"]]
+          assert "to_markdown" in names and "render_page" in names, names
+          p.kill()
+          print("mcp ok", names)
+          PY
