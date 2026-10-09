@@ -32,8 +32,10 @@ classifiers = [
 
 [project.optional-dependencies]
 numpy = ["numpy"]
+# editing (read_contents / redaction / insert_text / save): all permissive (BSD-3, MIT, HPND)
+edit = ["pypdf>=5.1", "fonttools>=4.40", "pillow>=9"]
 # pymupdf (AGPL) is only used by the optional accuracy tests/benchmarks, never at runtime
-test = ["pytest>=7", "numpy"]
+test = ["pytest>=7", "numpy", "pypdf>=5.1", "fonttools>=4.40", "pillow>=9"]
 compare = ["pymupdf", "pdftext"]
 
 [project.urls]
