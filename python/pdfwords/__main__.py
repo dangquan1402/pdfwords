@@ -14,16 +14,34 @@
     pdfwords export file.pdf [--format markdown|html|xhtml|xml|hocr|alto] [--pages ...] [-o out.md]
     pdfwords chunks file.pdf [--max-chars 2000] [--overlap 0]      # JSON lines with page+bbox provenance
     pdfwords objects file.pdf [--pages 0] [--kind images|drawings|struct]
+    pdfwords tables file.pdf [--pages 0] [-f json|markdown|csv] [--strategy auto|lines|text]
+    pdfwords frame file.pdf -o words.parquet [--kind chars|spans|lines|words|blocks]  # or -o x.csv
+    pdfwords file.pdf --ocr auto [--ocr-engine tesseract|rapidocr|ocrmac] [--ocr-lang eng]
     pdfwords mcp [--root DIR]                                      # MCP server (stdio) for LLM agents
 """
 import argparse
 import json
+import os
 import sys
 
 import pdfwords
 
 SUBCOMMANDS = ("extract", "redact", "insert-text", "contents", "debug", "links", "annots", "toc", "quality",
-               "search", "pdftext", "render", "export", "chunks", "objects", "mcp")
+               "search", "pdftext", "render", "export", "chunks", "objects", "mcp",
+               "tables", "frame")
+
+
+def _ocr_args(ap):
+    ap.add_argument("--ocr", choices=["auto", "always"], help="OCR pages: auto = only pages that need it")
+    ap.add_argument("--ocr-engine", default="auto", help="auto | tesseract | rapidocr | ocrmac")
+    ap.add_argument("--ocr-lang", help="engine language, e.g. eng, eng+deu (tesseract)")
+    ap.add_argument("--ocr-dpi", type=float, default=300)
+
+
+def _ocr_spec(a):
+    if not a.ocr:
+        return None
+    return {"mode": a.ocr, "engine": a.ocr_engine, "lang": a.ocr_lang, "dpi": a.ocr_dpi}
 
 
 def _pages(spec, n):
@@ -79,6 +97,7 @@ def extract(argv):
     ap.add_argument("--links", action="store_true", help="dict/rawdict: split spans at links, add span 'url'")
     ap.add_argument("--flatten", action="store_true", help="render form values/annotations into the text first")
     ap.add_argument("--workers", type=int, default=None, help="extract pages in N processes")
+    _ocr_args(ap)
     ap.add_argument("--password")
     ap.add_argument("-o", "--out")
     a = ap.parse_args(argv)
@@ -90,6 +109,8 @@ def extract(argv):
             kw["roles"] = True
     else:
         kw["dehyphenate"] = a.dehyphenate
+    if a.ocr:
+        kw["ocr"] = _ocr_spec(a)
     with pdfwords.open(a.pdf, a.password, backend=a.backend, flatten=a.flatten) as doc:
         pages = _pages(a.pages, len(doc))
         res = []
@@ -376,6 +397,7 @@ def export_cli(argv):
     ap.add_argument("--no-tables", action="store_true", help="markdown: no table detection")
     ap.add_argument("--image-dir", help="markdown: write page images here and link them")
     ap.add_argument("--page-separators", action="store_true", help="markdown: <!-- page N --> markers")
+    _ocr_args(ap)
     ap.add_argument("--password")
     ap.add_argument("-o", "--out")
     a = ap.parse_args(argv)
@@ -387,7 +409,7 @@ def export_cli(argv):
             kw.update(page_separators=a.page_separators)
             if a.image_dir:
                 kw.update(images=True, image_dir=a.image_dir)
-    with pdfwords.open(a.pdf, a.password) as doc:
+    with pdfwords.open(a.pdf, a.password, ocr=_ocr_spec(a)) as doc:
         s = pdfwords.export(doc, fmt, _pages(a.pages, len(doc)), sort=a.sort, dpi=a.dpi, **kw)
     _out(s, a.out)
 
@@ -417,6 +439,66 @@ def objects_cli(argv):
         lambda ap: ap.add_argument("--kind", default="images", choices=["images", "drawings", "struct"]))
 
 
+def tables_cli(argv):
+    ap = argparse.ArgumentParser(prog="pdfwords tables", description="detect tables (ruled grids, "
+                                 "rule-delimited and whitespace-aligned)")
+    ap.add_argument("pdf")
+    ap.add_argument("--pages")
+    ap.add_argument("-f", "--format", default="json", choices=["json", "markdown", "md", "csv"])
+    ap.add_argument("--strategy", default="auto", choices=["auto", "lines", "text"])
+    ap.add_argument("--rotated", action="store_true")
+    ap.add_argument("--password")
+    ap.add_argument("-o", "--out", help="output file (csv: a directory, one file per table)")
+    a = ap.parse_args(argv)
+    res, parts = [], []
+    with pdfwords.open(a.pdf, a.password) as doc:
+        for i in _pages(a.pages, len(doc)):
+            for k, t in enumerate(doc[i].find_tables(strategy=a.strategy, rotated=a.rotated)):
+                if a.format == "json":
+                    res.append({"page": i, **t.to_dict()})
+                elif a.format == "csv":
+                    if a.out:
+                        os.makedirs(a.out, exist_ok=True)
+                        t.to_csv(os.path.join(a.out, f"page{i}_table{k}.csv"))
+                    else:
+                        parts.append(f"# page {i} table {k}\n" + t.to_csv())
+                else:
+                    parts.append(f"<!-- page {i} table {k} -->\n" + t.to_markdown())
+    if a.format == "json":
+        _out(json.dumps(res, ensure_ascii=False), a.out)
+    elif not (a.format == "csv" and a.out):
+        _out("\n\n".join(parts), a.out)
+
+
+def frame_cli(argv):
+    from pdfwords.frames import KINDS
+    ap = argparse.ArgumentParser(prog="pdfwords frame", description="one row per char/span/line/word/block "
+                                 "as Parquet (needs pyarrow) or CSV")
+    ap.add_argument("pdf")
+    ap.add_argument("-o", "--out", required=True, help="*.parquet or *.csv")
+    ap.add_argument("--kind", default="words", choices=KINDS)
+    ap.add_argument("--pages")
+    ap.add_argument("--sort", default="none", choices=["none", "simple", "xycut"])
+    _ocr_args(ap)
+    ap.add_argument("--password")
+    a = ap.parse_args(argv)
+    from pdfwords import frames
+    kw = {"sort": {"none": False, "simple": True, "xycut": "xycut"}[a.sort]}
+    if a.ocr:
+        kw["ocr"] = _ocr_spec(a)
+    with pdfwords.open(a.pdf, a.password) as doc:
+        pages = _pages(a.pages, len(doc))
+        if a.out.endswith(".csv"):
+            import csv
+            cols = frames.records(doc, a.kind, pages, **kw)
+            with open(a.out, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(cols)
+                w.writerows(zip(*cols.values()))
+        else:
+            frames.to_parquet(doc, a.out, a.kind, pages, **kw)
+
+
 def mcp_cli(argv):
     from pdfwords.mcp_server import main as m
     m(argv)
@@ -429,7 +511,8 @@ def main(argv=None):
         return {"extract": extract, "redact": redact, "insert-text": insert_text, "contents": contents,
                 "debug": debug, "links": links, "annots": annots, "toc": toc, "quality": quality,
                 "search": search, "pdftext": pdftext_cli, "render": render, "export": export_cli,
-                "chunks": chunks_cli, "objects": objects_cli, "mcp": mcp_cli}[cmd](rest)
+                "chunks": chunks_cli, "objects": objects_cli, "mcp": mcp_cli,
+                "tables": tables_cli, "frame": frame_cli}[cmd](rest)
     return extract(argv)
 
 

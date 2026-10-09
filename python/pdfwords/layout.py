@@ -112,6 +112,7 @@ def build_blocks(glyphs, clip=None, params=None):
     pen = prev_origin = None
     last_c = None
     last_bidi = 0
+    line_rtl = False  # current line holds RTL chars: weak/neutral chars follow the RTL rules
     start_x = 0.0
     starts_with_bullet = False
 
@@ -148,7 +149,7 @@ def build_blocks(glyphs, clip=None, params=None):
             if abs(shift) < baseline_tol:
                 if bidi != last_bidi:
                     start_line = False
-                elif bidi:  # RTL: accept logical order (pen moving backwards) or visual order
+                elif bidi or (line_rtl and _bidi_kind(g.c) != "L"):  # RTL: accept logical order (pen moving backwards) or visual order
                     adv = math.hypot(g.qx - g.px, g.qy - g.py) / size
                     lsp = (g.dx * (g.px - prev_origin[0]) + g.dy * (g.py - prev_origin[1])) / size + adv
                     if abs(lsp) < word_gap:
@@ -187,14 +188,17 @@ def build_blocks(glyphs, clip=None, params=None):
             blk.lines.append(line)
             start_x = g.px
             starts_with_bullet = g.c in _BULLETS
+            line_rtl = False
         if insert_space and g.c != " ":
             sb = _char_box(pen[0], pen[1], g.px, g.py, g.dx, g.dy, g.size, g.font)
             line.chars.append(Char(" ", pen, sb, g.size, g.font, g.color, True, bidi))
         line.chars.append(Char(g.c, (g.px, g.py), box, g.size, g.font, g.color, False, bidi, g.idx))
         last_c, last_bidi = g.c, bidi
+        line_rtl = line_rtl or bool(bidi)
         prev_origin = (g.px, g.py)
         pen = (g.qx, g.qy)
 
+    blocks = _merge_vertical(blocks)
     # finalise bboxes, drop empty lines, reorder visual RTL lines into logical order
     out = []
     for b in blocks:
@@ -219,29 +223,177 @@ def build_blocks(glyphs, clip=None, params=None):
     return out
 
 
+def _is_cjk(c):
+    o = ord(c)
+    return (0x2E80 <= o <= 0x9FFF or 0xAC00 <= o <= 0xD7AF or 0xF900 <= o <= 0xFAFF
+            or 0xFE30 <= o <= 0xFE4F or 0xFF00 <= o <= 0xFFEF or 0x20000 <= o <= 0x3FFFF)
+
+
+def _real(line):
+    return [ch for ch in line.chars if not ch.synthetic and ch.c != " "]
+
+
+def _stacks(a, b):
+    """b (one CJK glyph) sits directly below the last glyph of a (one glyph or a vertical line)."""
+    ra, rb = _real(a), _real(b)
+    if not ra or len(rb) != 1 or not (a.wmode or len(ra) == 1):
+        return False
+    if a.dir[0] < 0.999 or b.dir[0] < 0.999:
+        return False
+    ca, cb = ra[-1], rb[0]
+    if not (_is_cjk(ca.c) and _is_cjk(cb.c)):
+        return False
+    s = max(ca.size, cb.size, 1.0)
+    dy = cb.origin[1] - ca.origin[1]
+    return abs(cb.origin[0] - ca.origin[0]) < 0.3 * s and 0.5 * s < dy < 1.8 * s
+
+
+def _merge_vertical(blocks):
+    """Vertical writing (CJK, Identity-V fonts): PDFium reports every glyph as horizontal text one
+    em below the previous one, so the line builder makes one line per glyph. Re-join stacked CJK
+    glyphs into vertical lines (wmode 1), group neighbouring columns into blocks and order the
+    columns right to left."""
+    if not any(ln.chars and _is_cjk(ln.chars[0].c) for b in blocks for ln in b.lines):
+        return blocks
+    prev, merged = None, False
+    for b in blocks:
+        keep = []
+        for ln in b.lines:
+            if not ln.chars:
+                continue
+            if prev is not None and _stacks(prev, ln):
+                prev.chars.extend(ln.chars)
+                prev.wmode, merged = 1, True
+            else:
+                keep.append(ln)
+                prev = ln
+        b.lines = keep
+    if not merged:
+        return blocks
+    out = []
+    for b in blocks:
+        if not b.lines:
+            continue
+        last = out[-1] if out else None
+        if last is not None and _vertical_block(last) and _vertical_block(b):
+            c0, c1 = last.lines[-1].chars[0], b.lines[0].chars[0]
+            s = max(c0.size, c1.size, 1.0)
+            if abs(c0.origin[1] - c1.origin[1]) <= 1.5 * s and abs(c0.origin[0] - c1.origin[0]) <= 2.5 * s:
+                last.lines.extend(b.lines)
+                continue
+        out.append(b)
+    for b in out:
+        if _vertical_block(b):
+            b.lines.sort(key=lambda ln: -ln.chars[0].origin[0])
+    return out
+
+
+def _vertical_block(b):
+    return all(ln.wmode == 1 for ln in b.lines)
+
+
 def _looks_visual(line):
     """RTL chars emitted left-to-right (PDFium never reorders): visual order."""
     rtl = [c for c in line.chars if c.bidi]
     return len(rtl) > 1 and rtl[-1].origin[0] > rtl[0].origin[0]
 
 
+def _bidi_kind(ch):
+    """Strong / number / neutral class for the bidi resolution below."""
+    t = unicodedata.bidirectional(ch)
+    if t in ("R", "AL"):
+        return "R"
+    if t == "L":
+        return "L"
+    if t in ("EN", "AN"):
+        return "N"
+    return "O"
+
+
+def bidi_levels(kinds):
+    """UAX #9-lite on a VISUAL sequence of kinds ("L", "R", "N" number, "O" neutral) ->
+    (embedding levels, paragraph level). Paragraph direction: RTL when strong RTL chars are
+    at least as many as LTR ones. Numbers next to RTL text act as RTL (W2/N1) and keep their
+    own left-to-right order (level 2); neutrals take the direction of their neighbours when both
+    sides agree, else the paragraph direction (N1/N2)."""
+    n = len(kinds)
+    nr = sum(1 for k in kinds if k == "R")
+    nl = sum(1 for k in kinds if k == "L")
+    base = 1 if nr and nr >= nl else 0
+    strong = [None] * n           # nearest strong (L/R) to the left / right
+    left, right = [None] * n, [None] * n
+    last = None
+    for i, k in enumerate(kinds):
+        left[i] = last
+        if k in ("L", "R"):
+            last = k
+    last = None
+    for i in range(n - 1, -1, -1):
+        right[i] = last
+        if kinds[i] in ("L", "R"):
+            last = kinds[i]
+    for i, k in enumerate(kinds):    # resolved direction of every char
+        if k in ("L", "R"):
+            strong[i] = k
+        elif k == "N":
+            strong[i] = "R" if "R" in (left[i], right[i]) or (base and None in (left[i], right[i])) else "L"
+    lev = [0] * n
+    sos = eos = "R" if base else "L"
+    for i, k in enumerate(kinds):
+        if k == "O":
+            j = i - 1
+            while j >= 0 and kinds[j] == "O":
+                j -= 1
+            a = strong[j] if j >= 0 else sos
+            j = i + 1
+            while j < n and kinds[j] == "O":
+                j += 1
+            b = strong[j] if j < n else eos
+            d = a if a == b else ("R" if base else "L")
+            lev[i] = 1 if d == "R" else (2 if base else 0)
+        elif k == "N":
+            lev[i] = 2 if (base or strong[i] == "R") else 0
+        else:
+            lev[i] = 1 if k == "R" else (2 if base else 0)
+    return lev, base
+
+
+def reorder(items, levels):
+    """UAX #9 rule L2: reverse every maximal run at level >= k, from the highest level down to
+    1. The permutation is its own inverse, so it maps visual -> logical as well."""
+    items = list(items)
+    if not levels:
+        return items
+    lev = list(levels)
+    for k in range(max(lev), 0, -1):
+        i, n = 0, len(items)
+        while i < n:
+            if lev[i] >= k:
+                j = i
+                while j < n and lev[j] >= k:
+                    j += 1
+                items[i:j] = items[i:j][::-1]
+                lev[i:j] = lev[i:j][::-1]
+                i = j
+            else:
+                i += 1
+    return items
+
+
+MIRROR = dict(zip("()[]{}<>\u00ab\u00bb\u2039\u203a", ")(][}{><\u00bb\u00ab\u203a\u2039"))
+
+
 def _visual_to_logical(chars):
-    """Minimal bidi: chars arrive in visual (left->right) order; produce logical order
-    for an RTL paragraph: reverse the run order, keep LTR runs (digits/latin) intact."""
-    runs, cur, cur_rtl = [], [], None
-    for c in sorted(chars, key=lambda c: c.origin[0]):
-        r = bool(c.bidi) if not c.c.isspace() else cur_rtl
-        if cur and r != cur_rtl:
-            runs.append((cur_rtl, cur))
-            cur = []
-        cur.append(c)
-        cur_rtl = r
-    if cur:
-        runs.append((cur_rtl, cur))
-    res = []
-    for rtl, run in reversed(runs):
-        res.extend(reversed(run) if rtl else run)
-    return res
+    """Chars arrive in visual (left -> right) order: resolve bidi levels (UAX #9-lite, see
+    bidi_levels) and reorder them into logical order; paired brackets drawn inside RTL runs are
+    mirrored back (L4). Handles RTL paragraphs with numbers and embedded LTR words, and LTR
+    paragraphs with embedded RTL words."""
+    vis = sorted(chars, key=lambda c: c.origin[0])
+    lev, _ = bidi_levels([_bidi_kind(c.c) for c in vis])
+    for c, lv in zip(vis, lev):
+        if lv % 2 and c.c in MIRROR:
+            c.c = MIRROR[c.c]
+    return reorder(vis, lev)
 
 
 def is_superscript(line, ch, rise=None):

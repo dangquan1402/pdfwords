@@ -77,7 +77,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "pdfwords-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libloading",
  "regex",
@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "pdfwords-py"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "pdfwords-core",
  "pyo3",

@@ -21,12 +21,12 @@ jobs:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install pypdfium2
@@ -49,14 +49,14 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Cache downloaded test PDFs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tests/data
           key: test-pdfs-${{ hashFiles('tools/fetch_test_pdfs.py') }}
@@ -67,6 +67,7 @@ jobs:
           python -m pip install -U pip
           python -m pip install pytest numpy pypdfium2 "pypdf>=5.1" "fonttools>=4.40" "pillow>=9"
           python -m pip install pymupdf || echo "::warning::pymupdf unavailable; accuracy tests will be skipped"
+          python -m pip install pandas pyarrow || echo "::warning::pandas/pyarrow unavailable; frame tests will be skipped"
       - name: Tests - pure-Python fallback (extension absent)
         env:
           PYTHONPATH: python
@@ -102,6 +103,21 @@ jobs:
           pdfwords export tests/fixtures/irs_w9.pdf --pages 0 -f alto | python -c "import sys, xml.dom.minidom as m; m.parseString(sys.stdin.buffer.read())"
           pdfwords chunks tests/fixtures/irs_w9.pdf --pages 0 | head -1 | grep -q '"provenance"'
           pdfwords objects tests/fixtures/irs_w9.pdf --pages 0 --kind struct | grep -q '"Document"'
+          pdfwords tables tests/fixtures/irs_w9.pdf --pages 0 -f md > tables.md
+          pdfwords frame tests/fixtures/simple_text.pdf -o words.csv --kind words
+          grep -q "^page,block,line,word" words.csv
+      - name: OCR engines (Tesseract via pytesseract, RapidOCR)
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q tesseract-ocr
+          python -m pip install pytesseract rapidocr_onnxruntime || echo "::warning::rapidocr unavailable"
+          python -m pytest -q -ra tests/test_ocr.py
+          python - <<'PY'
+          import pdfwords
+          from pdfwords.ocr import available_engines
+          print("engines:", available_engines())
+          assert "tesseract" in available_engines()
+          PY
       - name: LLM integrations (LangChain, LlamaIndex, MCP)
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         run: |

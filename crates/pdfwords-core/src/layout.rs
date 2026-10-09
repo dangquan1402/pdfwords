@@ -196,6 +196,8 @@ pub fn build_blocks(pg: &PageGlyphs, clip: Option<BBox>, params: &LayoutParams) 
     let mut prev_origin = (0.0f64, 0.0f64);
     let mut last_c: Option<char> = None;
     let mut last_bidi: u8 = 0;
+    // current line holds RTL chars: weak/neutral chars then follow the RTL rules
+    let mut line_rtl = false;
     let mut start_x = 0.0f64;
     let mut starts_with_bullet = false;
 
@@ -252,7 +254,7 @@ pub fn build_blocks(pg: &PageGlyphs, clip: Option<BBox>, params: &LayoutParams) 
                 if shift.abs() < baseline_tol {
                     if bidi != last_bidi {
                         start_line = false;
-                    } else if bidi != 0 {
+                    } else if bidi != 0 || (line_rtl && bidi_kind(g.c) != BidiKind::L) {
                         let adv = (g.qx - g.px).hypot(g.qy - g.py) / size;
                         let lsp = (g.dx * (g.px - prev_origin.0) + g.dy * (g.py - prev_origin.1))
                             / size
@@ -313,6 +315,7 @@ pub fn build_blocks(pg: &PageGlyphs, clip: Option<BBox>, params: &LayoutParams) 
             have_line = true;
             start_x = g.px;
             starts_with_bullet = is_bullet(g.c);
+            line_rtl = false;
         }
         let line = blk.lines.last_mut().unwrap();
         if insert_space && g.c != ' ' {
@@ -344,10 +347,12 @@ pub fn build_blocks(pg: &PageGlyphs, clip: Option<BBox>, params: &LayoutParams) 
         });
         last_c = Some(g.c);
         last_bidi = bidi;
+        line_rtl |= bidi != 0;
         prev_origin = (g.px, g.py);
         pen = (g.qx, g.qy);
     }
 
+    let blocks = merge_vertical(blocks);
     let mut out: Vec<Block> = Vec::with_capacity(blocks.len());
     for mut b in blocks.into_iter() {
         b.lines.retain(|l| !l.chars.is_empty());
@@ -391,41 +396,283 @@ pub fn build_blocks(pg: &PageGlyphs, clip: Option<BBox>, params: &LayoutParams) 
     out
 }
 
+fn is_cjk(c: char) -> bool {
+    let o = c as u32;
+    (0x2E80..=0x9FFF).contains(&o)
+        || (0xAC00..=0xD7AF).contains(&o)
+        || (0xF900..=0xFAFF).contains(&o)
+        || (0xFE30..=0xFE4F).contains(&o)
+        || (0xFF00..=0xFFEF).contains(&o)
+        || (0x20000..=0x3FFFF).contains(&o)
+}
+
+fn real_chars(line: &Line) -> impl Iterator<Item = &Char> {
+    line.chars.iter().filter(|c| !c.synthetic && c.c != ' ')
+}
+
+/// `b` (one CJK glyph) sits directly below the last glyph of `a` (one glyph or a vertical line).
+fn stacks(a: &Line, b: &Line) -> bool {
+    let na = real_chars(a).count();
+    if na == 0 || real_chars(b).count() != 1 || !(a.wmode == 1 || na == 1) {
+        return false;
+    }
+    if a.dir.0 < 0.999 || b.dir.0 < 0.999 {
+        return false;
+    }
+    let ca = real_chars(a).last().unwrap();
+    let cb = real_chars(b).next().unwrap();
+    if !(is_cjk(ca.c) && is_cjk(cb.c)) {
+        return false;
+    }
+    let s = ca.size.max(cb.size).max(1.0);
+    let dy = cb.oy - ca.oy;
+    (cb.ox - ca.ox).abs() < 0.3 * s && 0.5 * s < dy && dy < 1.8 * s
+}
+
+fn vertical_block(b: &Block) -> bool {
+    b.lines.iter().all(|l| l.wmode == 1)
+}
+
+/// Vertical writing (CJK, Identity-V fonts): see `_merge_vertical` in the Python package.
+fn merge_vertical(mut blocks: Vec<Block>) -> Vec<Block> {
+    if !blocks
+        .iter()
+        .flat_map(|b| b.lines.iter())
+        .any(|l| l.chars.first().is_some_and(|c| is_cjk(c.c)))
+    {
+        return blocks;
+    }
+    let mut merged = false;
+    // (block index, line index) of the previous kept line
+    let mut prev: Option<(usize, usize)> = None;
+    for bi in 0..blocks.len() {
+        let lines = std::mem::take(&mut blocks[bi].lines);
+        for ln in lines.into_iter() {
+            if ln.chars.is_empty() {
+                continue;
+            }
+            if let Some((pb, pl)) = prev {
+                let ok = {
+                    let p = if pb == bi {
+                        &blocks[bi].lines[pl]
+                    } else {
+                        &blocks[pb].lines[pl]
+                    };
+                    stacks(p, &ln)
+                };
+                if ok {
+                    let p = &mut blocks[pb].lines[pl];
+                    p.chars.extend(ln.chars);
+                    p.wmode = 1;
+                    merged = true;
+                    continue;
+                }
+            }
+            blocks[bi].lines.push(ln);
+            prev = Some((bi, blocks[bi].lines.len() - 1));
+        }
+    }
+    if !merged {
+        return blocks;
+    }
+    let mut out: Vec<Block> = Vec::with_capacity(blocks.len());
+    for b in blocks.into_iter() {
+        if b.lines.is_empty() {
+            continue;
+        }
+        if let Some(last) = out.last_mut() {
+            if vertical_block(last) && vertical_block(&b) {
+                let c0 = last.lines.last().unwrap().chars[0];
+                let c1 = b.lines[0].chars[0];
+                let s = c0.size.max(c1.size).max(1.0);
+                if (c0.oy - c1.oy).abs() <= 1.5 * s && (c0.ox - c1.ox).abs() <= 2.5 * s {
+                    last.lines.extend(b.lines);
+                    continue;
+                }
+            }
+        }
+        out.push(b);
+    }
+    for b in out.iter_mut() {
+        if vertical_block(b) {
+            b.lines.sort_by(|x, y| {
+                y.chars[0]
+                    .ox
+                    .partial_cmp(&x.chars[0].ox)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+    }
+    out
+}
+
 fn looks_visual(line: &Line) -> bool {
     let rtl: Vec<&Char> = line.chars.iter().filter(|c| c.bidi != 0).collect();
     rtl.len() > 1 && rtl[rtl.len() - 1].ox > rtl[0].ox
 }
 
-fn visual_to_logical(chars: &[Char]) -> Vec<Char> {
-    let mut sorted: Vec<Char> = chars.to_vec();
-    sorted.sort_by(|a, b| a.ox.partial_cmp(&b.ox).unwrap_or(std::cmp::Ordering::Equal));
-    let mut runs: Vec<(Option<bool>, Vec<Char>)> = Vec::new();
-    let mut cur: Vec<Char> = Vec::new();
-    let mut cur_rtl: Option<bool> = None;
-    for c in sorted {
-        let r = if !c.c.is_whitespace() {
-            Some(c.bidi != 0)
-        } else {
-            cur_rtl
+/// Bidi class used by the UAX #9-lite resolution: strong L / strong R / number / neutral.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BidiKind {
+    L,
+    R,
+    N,
+    O,
+}
+
+pub fn bidi_kind(c: char) -> BidiKind {
+    match unicode_bidi::bidi_class(c) {
+        BidiClass::R | BidiClass::AL => BidiKind::R,
+        BidiClass::L => BidiKind::L,
+        BidiClass::EN | BidiClass::AN => BidiKind::N,
+        _ => BidiKind::O,
+    }
+}
+
+/// UAX #9-lite on a VISUAL sequence (see `bidi_levels` in the Python package): returns the
+/// embedding levels and the paragraph level (1 = RTL when strong RTL chars >= LTR ones).
+pub fn bidi_levels(kinds: &[BidiKind]) -> (Vec<u8>, u8) {
+    use BidiKind::*;
+    let n = kinds.len();
+    let nr = kinds.iter().filter(|k| **k == R).count();
+    let nl = kinds.iter().filter(|k| **k == L).count();
+    let base: u8 = if nr > 0 && nr >= nl { 1 } else { 0 };
+    let mut left: Vec<Option<BidiKind>> = vec![None; n];
+    let mut right: Vec<Option<BidiKind>> = vec![None; n];
+    let mut last = None;
+    for i in 0..n {
+        left[i] = last;
+        if matches!(kinds[i], L | R) {
+            last = Some(kinds[i]);
+        }
+    }
+    last = None;
+    for i in (0..n).rev() {
+        right[i] = last;
+        if matches!(kinds[i], L | R) {
+            last = Some(kinds[i]);
+        }
+    }
+    let mut strong: Vec<Option<BidiKind>> = vec![None; n];
+    for i in 0..n {
+        strong[i] = match kinds[i] {
+            L | R => Some(kinds[i]),
+            N => {
+                if left[i] == Some(R)
+                    || right[i] == Some(R)
+                    || (base == 1 && (left[i].is_none() || right[i].is_none()))
+                {
+                    Some(R)
+                } else {
+                    Some(L)
+                }
+            }
+            O => None,
         };
-        if !cur.is_empty() && r != cur_rtl {
-            runs.push((cur_rtl, std::mem::take(&mut cur)));
+    }
+    let sos = if base == 1 { R } else { L };
+    let mut lev = vec![0u8; n];
+    for i in 0..n {
+        lev[i] = match kinds[i] {
+            O => {
+                let mut j = i as isize - 1;
+                while j >= 0 && kinds[j as usize] == O {
+                    j -= 1;
+                }
+                let a = if j >= 0 {
+                    strong[j as usize].unwrap_or(sos)
+                } else {
+                    sos
+                };
+                let mut k = i + 1;
+                while k < n && kinds[k] == O {
+                    k += 1;
+                }
+                let b = if k < n { strong[k].unwrap_or(sos) } else { sos };
+                let d = if a == b { a } else { sos };
+                if d == R {
+                    1
+                } else if base == 1 {
+                    2
+                } else {
+                    0
+                }
+            }
+            N => {
+                if base == 1 || strong[i] == Some(R) {
+                    2
+                } else {
+                    0
+                }
+            }
+            R => 1,
+            L => {
+                if base == 1 {
+                    2
+                } else {
+                    0
+                }
+            }
+        };
+    }
+    (lev, base)
+}
+
+/// UAX #9 rule L2 (an involution: maps visual -> logical as well as logical -> visual).
+pub fn reorder<T: Clone>(items: &[T], levels: &[u8]) -> Vec<T> {
+    let mut items: Vec<T> = items.to_vec();
+    let mut lev: Vec<u8> = levels.to_vec();
+    let max = lev.iter().copied().max().unwrap_or(0);
+    let n = items.len();
+    for k in (1..=max).rev() {
+        let mut i = 0;
+        while i < n {
+            if lev[i] >= k {
+                let mut j = i;
+                while j < n && lev[j] >= k {
+                    j += 1;
+                }
+                items[i..j].reverse();
+                lev[i..j].reverse();
+                i = j;
+            } else {
+                i += 1;
+            }
         }
-        cur.push(c);
-        cur_rtl = r;
     }
-    if !cur.is_empty() {
-        runs.push((cur_rtl, cur));
+    items
+}
+
+fn mirror(c: char) -> char {
+    match c {
+        '(' => ')',
+        ')' => '(',
+        '[' => ']',
+        ']' => '[',
+        '{' => '}',
+        '}' => '{',
+        '<' => '>',
+        '>' => '<',
+        '\u{ab}' => '\u{bb}',
+        '\u{bb}' => '\u{ab}',
+        '\u{2039}' => '\u{203a}',
+        '\u{203a}' => '\u{2039}',
+        _ => c,
     }
-    let mut res = Vec::with_capacity(chars.len());
-    for (rtl, run) in runs.into_iter().rev() {
-        if rtl == Some(true) {
-            res.extend(run.into_iter().rev());
-        } else {
-            res.extend(run);
+}
+
+/// Visual (left -> right) chars -> logical order (UAX #9-lite levels + L2 + L4 mirroring).
+fn visual_to_logical(chars: &[Char]) -> Vec<Char> {
+    let mut vis: Vec<Char> = chars.to_vec();
+    vis.sort_by(|a, b| a.ox.partial_cmp(&b.ox).unwrap_or(std::cmp::Ordering::Equal));
+    let kinds: Vec<BidiKind> = vis.iter().map(|c| bidi_kind(c.c)).collect();
+    let (lev, _) = bidi_levels(&kinds);
+    for (c, l) in vis.iter_mut().zip(lev.iter()) {
+        if l % 2 == 1 {
+            c.c = mirror(c.c);
         }
     }
-    res
+    reorder(&vis, &lev)
 }
 
 #[inline]
@@ -489,4 +736,31 @@ pub fn make_spans(line: &Line, fonts: &[FontInfo], params: &LayoutParams) -> Vec
         }
     }
     spans
+}
+
+#[cfg(test)]
+mod bidi_tests {
+    use super::*;
+
+    fn v2l(vis: &str) -> String {
+        let chars: Vec<char> = vis.chars().collect();
+        let kinds: Vec<BidiKind> = chars.iter().map(|c| bidi_kind(*c)).collect();
+        let (lev, _) = bidi_levels(&kinds);
+        let m: Vec<char> = chars
+            .iter()
+            .zip(lev.iter())
+            .map(|(c, l)| if l % 2 == 1 { mirror(*c) } else { *c })
+            .collect();
+        reorder(&m, &lev).into_iter().collect()
+    }
+
+    #[test]
+    fn visual_to_logical_cases() {
+        assert_eq!(v2l("םולש"), "שלום");
+        assert_eq!(v2l("123 םולש"), "שלום 123");
+        assert_eq!(v2l("abc םולש def"), "abc שלום def");
+        assert_eq!(v2l("ןושאר 2 קרפ"), "פרק 2 ראשון");
+        assert_eq!(v2l("Hello, םולש!"), "Hello, שלום!");
+        assert_eq!(v2l("(םולש)"), "(שלום)");
+    }
 }

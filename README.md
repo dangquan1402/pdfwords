@@ -40,7 +40,8 @@ PYTHONPATH=python python -c "import pdfwords; print(pdfwords.available_backends(
 The only runtime dependency is `pypdfium2`. `numpy` is optional, for `Page.words_array()`.
 Editing (content streams, redaction, text insertion) needs the `edit` extra:
 `pip install "pdfwords[edit]"`. It adds pypdf (BSD-3-Clause), fontTools (MIT) and
-Pillow (MIT-CMU).
+Pillow (MIT-CMU). Other optional extras: `ocr` (pytesseract; RapidOCR via `ocr-rapid`),
+`tables` (pandas), `arrow` (pyarrow), `render`, `langchain`, `llamaindex`, `mcp`.
 
 ## Quick start
 
@@ -99,6 +100,9 @@ page.needs_ocr();  doc.needs_ocr()        # True / list of page numbers without 
 page.search_for("hyphenation", quads=True, hit_max=10)   # matches across line breaks and line-end hyphens
 page.table_cells(cell_boxes, image_size=(w, h))          # text of each cell box from a layout/table model
 
+tabs = page.find_tables()       # ruled grids, booktabs-style and aligned tables (docs/TABLES.md)
+tabs[0].extract(); tabs[0].to_markdown(); tabs[0].to_csv("t.csv"); tabs[0].to_pandas(); tabs[0].cells
+
 # many pages: pages= and workers= on every mode, results streamed in page order
 for pno, words in doc.iter_pages("words", pages=range(0, 500), workers=4):
     ...
@@ -121,6 +125,21 @@ pdfwords debug paper.pdf --page 3 --show words,lines,blocks,order,links -o p3.pn
 ```python
 from pdfwords.debug import overlay
 overlay(page, show=("words", "blocks", "order")).save("p.png")   # chars words lines spans blocks order links annots widgets cells
+```
+
+## OCR fallback, RTL, vertical CJK, Arrow / Parquet
+
+```python
+page.get_text("words", ocr="auto")            # OCR only pages without a usable text layer (docs/OCR.md)
+doc = pdfwords.open("scan.pdf", ocr={"mode": "auto", "engine": "tesseract", "lang": "eng"})
+pdfwords.to_markdown(doc)                     # same schema everywhere: words, dict, markdown, chunks...
+
+# Hebrew/Arabic in visual or logical order -> logical text (UAX #9-lite: numbers, mixed LTR/RTL,
+# mirrored brackets); vertical Japanese/Chinese -> one line per column (wmode 1), right to left
+
+doc.to_arrow("words")                         # pyarrow.Table, one row per char|span|line|word|block
+doc.to_parquet("words.parquet", "chars")      # page, block, line, ..., x0, y0, x1, y1, text, font, size...
+doc.to_pandas("lines", pages=[0, 1])
 ```
 
 ## Markdown, chunks and other LLM-ready output
@@ -244,6 +263,9 @@ pdfwords export file.pdf -f markdown -o file.md      # html | xhtml | xml | hocr
 pdfwords chunks file.pdf --max-chars 1500 > chunks.jsonl
 pdfwords objects file.pdf --kind images|drawings|struct
 pdfwords mcp --root ~/Documents                      # MCP server (stdio)
+pdfwords tables file.pdf --pages 3 -f md             # json | markdown | csv (-o dir/)
+pdfwords frame file.pdf -o words.parquet --kind words   # or chars|spans|lines|blocks, or -o x.csv
+pdfwords scan.pdf --mode text --ocr auto --ocr-engine tesseract --ocr-lang eng
 ```
 
 ## Backends
@@ -304,10 +326,14 @@ superscript detection are all 1.0, and block agreement is 0.996. See
 
 ## Limitations
 
-* **No OCR.** Scanned pages without a text layer return nothing. `page.needs_ocr()` tells you
-  which pages to send to Tesseract, Apple Vision or ML Kit.
-* **No vertical CJK writing mode** (`wmode` is always 0). RTL support is a minimal
-  visual→logical reordering, not full UAX #9.
+* **OCR is optional and engine-bound.** `ocr="auto"` needs an engine installed (Tesseract,
+  RapidOCR or Apple Vision); OCR char boxes are evenly split inside each word.
+* **Bidi is UAX #9-lite**: numbers, neutrals, mixed-direction lines and bracket mirroring,
+  but no explicit embeddings/isolates (LRE/RLI...). **Vertical CJK** is detected for
+  unrotated text drawn glyph by glyph down a column (Identity-V fonts); rotated vertical
+  layouts and mixed tate-chu-yoko are not.
+* **Table detection is heuristic** (docs/TABLES.md): spanning cells in unruled tables are
+  split, multi-line cells in unruled tables become rows, form boxes can look like tables.
 * **Ligatures** come out decomposed by default ("fi"), because PDFium does not expose the
   original code point. `ligatures=True` re-composes U+FB00–FB06.
 * **Text blocks only** in `get_text("dict")`: images and vector paths are available separately
@@ -330,8 +356,7 @@ superscript detection are all 1.0, and block agreement is 0.996. See
     built with `cargo ndk`;
   * static linking of PDFium.
 * Publish `pdfwords-core` to crates.io.
-* Table detection for untagged PDFs, an OCR fallback with the same schema, full bidi,
-  vertical CJK, Arrow/Parquet output (0.4).
+* WebAssembly build of the Rust core (feasible; see [docs/WASM.md](docs/WASM.md)).
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture.
 
