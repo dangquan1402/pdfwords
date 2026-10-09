@@ -25,24 +25,27 @@ def _font(size):
         return ImageFont.load_default()
 
 
-def overlay(page, show=DEFAULT_LAYERS, scale=2.0, sort="xycut", cells=None, width=1):
+def overlay(page, show=DEFAULT_LAYERS, scale=2.0, sort="xycut", cells=None, width=1, dpi=None, **render_kw):
     """Render `page` (as displayed) and draw the requested layers. Returns a PIL.Image.
     show: any of chars, words, lines, spans, blocks, order (reading order arrows), links,
-          annots, widgets, cells (pass cells=[bbox, ...] in page coordinates)."""
+          annots, widgets, cells (pass cells=[bbox, ...] in page coordinates).
+    dpi: resolution (overrides scale); render_kw: passed to page.render (e.g. grayscale)."""
     from PIL import Image, ImageDraw
     show = tuple(s.strip() for s in (show.split(",") if isinstance(show, str) else show) if s.strip())
     bad = [s for s in show if s not in LAYERS]
     if bad:
         raise ValueError(f"unknown layer(s) {bad}; choose from {', '.join(LAYERS)}")
-    pg = page._page
-    img = pg.render(scale=scale, may_draw_forms=True).to_pil().convert("RGB")
+    if dpi is not None:
+        scale = dpi / 72.0
+    img = page.render(scale=scale, output="pil", **render_kw).convert("RGB")
+    sx, sy = img.size[0] / page.rect[2], img.size[1] / page.rect[3]   # exact pixels per point
     base = img.convert("RGBA")
     layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
     dr = ImageDraw.Draw(layer)
     fnt = _font(max(10, int(6 * scale)))
 
     def R(bb):
-        x0, y0, x1, y1 = (v * scale for v in bb)
+        x0, y0, x1, y1 = bb[0] * sx, bb[1] * sy, bb[2] * sx, bb[3] * sy
         return [min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)]
 
     def box(bb, key, fill_alpha=0, w=width):
@@ -75,7 +78,7 @@ def overlay(page, show=DEFAULT_LAYERS, scale=2.0, sort="xycut", cells=None, widt
             x0, y0 = R(b["bbox"])[:2]
             dr.text((x0 + 2, y0 + 1), str(i), fill=COLORS["blocks"] + (255,), font=fnt)
     if "order" in show:
-        pts = [((b["bbox"][0] + b["bbox"][2]) / 2 * scale, (b["bbox"][1] + b["bbox"][3]) / 2 * scale)
+        pts = [((b["bbox"][0] + b["bbox"][2]) / 2 * sx, (b["bbox"][1] + b["bbox"][3]) / 2 * sy)
                for b in d["blocks"]]
         c = COLORS["order"] + (230,)
         for i in range(len(pts) - 1):
@@ -99,7 +102,7 @@ def overlay(page, show=DEFAULT_LAYERS, scale=2.0, sort="xycut", cells=None, widt
         for a in page.annots(rotated=True):
             if a["rect"] and a["type"] not in ("Link", "Widget", "Popup"):
                 box(a["rect"], "annots", fill_alpha=40, w=width + 1)
-                dr.text((a["rect"][0] * scale, a["rect"][1] * scale - 12 * scale / 2), a["type"],
+                dr.text((a["rect"][0] * sx, a["rect"][1] * sy - 6 * scale), a["type"],
                         fill=COLORS["annots"] + (255,), font=fnt)
     if "widgets" in show:
         for wdg in page.widgets(rotated=True):

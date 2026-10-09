@@ -93,3 +93,7 @@ jobs:
           pdfwords links tests/fixtures/simple_text.pdf > /dev/null
           pdfwords debug tests/fixtures/irs_w9.pdf --page 0 --show words,blocks,order -o overlay.png
           test -s overlay.png
+          pdfwords render tests/fixtures/irs_w9.pdf --pages 0-1 --dpi 50 --out-dir rendered --workers 2
+          test -s rendered/irs_w9-0001.jpg
+          pdfwords render tests/fixtures/irs_w9.pdf --pages 0 --overlay words,blocks -o render_overlay.png
+          test -s render_overlay.png

@@ -150,3 +150,43 @@ fn end_to_end_with_pdfium() {
         (p.FPDF_CloseDocument)(doc);
     }
 }
+
+#[test]
+fn render_end_to_end() {
+    let Ok(lib) = std::env::var("PDFWORDS_PDFIUM_LIB") else {
+        eprintln!("PDFWORDS_PDFIUM_LIB not set: skipping PDFium render test");
+        return;
+    };
+    let p = Pdfium::load(&lib).expect("load PDFium");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/rot90.pdf"
+    );
+    unsafe {
+        let doc = open_document(&p, path, None).expect("open");
+        let o = RenderOptions {
+            scale: (1.0, 1.0),
+            ..Default::default()
+        };
+        let (g, buf) = render_page(&p, doc, 0, &o).expect("render");
+        // rot90.pdf is 300 x 500 pt with /Rotate 90: displayed 500 x 300
+        assert_eq!((g.w, g.h, g.channels), (500, 300, 3));
+        assert_eq!(buf.len(), 500 * 300 * 3);
+        assert!(buf.iter().any(|&v| v < 128), "some ink");
+        assert_eq!(&buf[..3], &[255, 255, 255]);
+        let o = RenderOptions {
+            scale: (1.0, 1.0),
+            rotated: false,
+            grayscale: true,
+            ..Default::default()
+        };
+        let (g, buf) = render_page(&p, doc, 0, &o).expect("render");
+        assert_eq!((g.w, g.h, g.channels, buf.len()), (300, 500, 1, 300 * 500));
+        let o = RenderOptions {
+            timeout: Some(std::time::Duration::from_secs(0)),
+            ..Default::default()
+        };
+        assert!(render_page(&p, doc, 0, &o).is_err());
+        (p.FPDF_CloseDocument)(doc);
+    }
+}
