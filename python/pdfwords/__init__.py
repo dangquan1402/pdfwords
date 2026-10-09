@@ -28,9 +28,9 @@ from .order import sort_simple, sort_xycut
 from .render import RenderTimeout, Pixmap  # noqa: F401
 from .annots import LINK_NONE, LINK_GOTO, LINK_URI, LINK_LAUNCH, LINK_NAMED, LINK_GOTOR  # noqa: F401
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = ["open", "Document", "Page", "available_backends", "default_backend", "parallel_words", "__version__",
-           "extract", "iter_pages", "RenderTimeout", "Pixmap", "convert_from_path", "convert_from_bytes", "LINK_NONE", "LINK_GOTO", "LINK_URI", "LINK_LAUNCH", "LINK_NAMED", "LINK_GOTOR",
+           "extract", "iter_pages", "RenderTimeout", "Pixmap", "convert_from_path", "convert_from_bytes", "to_markdown", "chunks", "export", "LINK_NONE", "LINK_GOTO", "LINK_URI", "LINK_LAUNCH", "LINK_NAMED", "LINK_GOTOR",
            "PDF_REDACT_IMAGE_NONE", "PDF_REDACT_IMAGE_REMOVE", "PDF_REDACT_IMAGE_PIXELS",
            "PDF_REDACT_LINE_ART_NONE", "PDF_REDACT_LINE_ART_REMOVE_IF_COVERED", "PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED",
            "PDF_REDACT_TEXT_REMOVE", "PDF_REDACT_TEXT_NONE"]
@@ -416,7 +416,7 @@ class Page:
         return pt, rc
 
     def get_text(self, option="text", *, sort=False, clip=True, rotated=False,
-                 ligatures=False, dehyphenate=False, delimiters=None, extended=False, links=False):
+                 ligatures=False, dehyphenate=False, delimiters=None, extended=False, links=False, roles=False):
         """option: text | words | blocks | dict | rawdict | json | rawjson.
         sort: False (content order) | True (PyMuPDF-style y/x) | "xycut" (column-aware).
         ligatures: False (default) -> ligature glyphs come out as plain letters ("fi"), the first
@@ -428,8 +428,18 @@ class Page:
             stream order; -1 for inserted spaces).
         links: dict/rawdict/json only - split spans at link boundaries and give every span a "url"
             ("" when not linked): link annotations (URIs, "#page=N" for internal targets) and URLs
-            written in the text (auto-detected)."""
+            written in the text (auto-detected).
+        sort="struct": tagged PDFs - the structure tree's (author's) reading order; blocks are split
+            where the structure element changes; untagged text keeps its xycut position.
+        roles: dict/rawdict only - blocks and spans carry "role" (P, H1, LI, TD, ...; "" untagged)
+            and spans "mcid" (tagged PDFs)."""
         option = option.lower()
+        if option in ("markdown", "md", "html", "xhtml", "xml", "hocr", "alto"):
+            from . import exporters
+            return exporters.page_export(self, option, sort=sort, clip=clip, rotated=rotated)
+        if sort == "struct" or roles:
+            return self._struct_text(option, sort, clip, rotated, ligatures, dehyphenate, delimiters, extended,
+                                     links, roles)
         if links and option in ("dict", "rawdict", "json", "rawjson"):
             d = self.get_text("rawdict", sort=sort, clip=clip, rotated=rotated, ligatures=ligatures, extended=extended)
             _split_link_spans(d, self._link_rects(rotated), keep_chars=option.startswith("raw"))
@@ -458,6 +468,40 @@ class Page:
         if option == "text":
             return "".join(self._block_text(b, lig, dehyphenate) for b in blocks)
         raise ValueError(f"unsupported option {option!r}")
+
+    def _struct_text(self, option, sort, clip, rotated, ligatures, dehyphenate, delimiters, extended, links, roles):
+        from .tagged import annotate, struct_sort
+        base = "xycut" if sort == "struct" else sort
+        d = self.get_text("rawdict", sort=base, clip=clip, rotated=rotated, ligatures=ligatures, extended=True)
+        order = annotate(self, d)
+        if sort == "struct" and order:
+            struct_sort(d)
+        for b in d["blocks"]:
+            b.pop("_rank", None)
+            b.setdefault("role", "")
+        if links and option in ("dict", "rawdict", "json", "rawjson"):
+            _split_link_spans(d, self._link_rects(rotated), keep_chars=True)
+        if not roles or option not in ("dict", "rawdict", "json", "rawjson"):
+            for b in d["blocks"]:
+                b.pop("role", None)
+                for ln in b["lines"]:
+                    for sp in ln["spans"]:
+                        sp.pop("role", None)
+                        sp.pop("mcid", None)
+        if not extended:
+            for b in d["blocks"]:
+                for ln in b["lines"]:
+                    for sp in ln["spans"]:
+                        sp.pop("weight", None)
+                        sp.pop("pdf_flags", None)
+                        for ch in sp["chars"]:
+                            ch.pop("idx", None)
+        for b in d["blocks"]:
+            for ln in b["lines"]:
+                for sp in ln["spans"]:
+                    for ch in sp["chars"]:
+                        ch.pop("mcid", None)
+        return _from_rawdict(d, option, dehyphenate, delimiters)
 
     # ------------------------------------------------------------------ search
     def search_for(self, needle, *, quads=False, clip=None, regex=False, ignore_case=True, rotated=False,
@@ -525,6 +569,38 @@ class Page:
         (by line, then x); a word goes to the cell covering most of it (>= min_overlap)."""
         from .tables import assign_cells
         return assign_cells(self, cells, image_size, rotated=rotated, min_overlap=min_overlap)
+
+    # ------------------------------------------------------------------ images, drawings, structure
+    def get_images(self, *, rotated=False, hashes=False):
+        """Images on the page (incl. inside Form XObjects), in painting order: dicts {number, bbox,
+        quad, width, height, bpc, colorspace (components), cs_name, xres, yres, filters, size
+        (encoded bytes), mcid[, digest with hashes=True]}."""
+        from .objects import get_images
+        return get_images(self, rotated=rotated, hashes=hashes)
+
+    get_image_info = get_images
+
+    def get_image(self, number, *, rendered=False):
+        """Decoded image `number` (see get_images) as a PIL.Image (rendered=True applies masks)."""
+        from .objects import get_image
+        return get_image(self, number, rendered=rendered)
+
+    def get_drawings(self, *, rotated=False, clip=None):
+        """Vector paths as dicts {items: [("l", p1, p2) | ("re", rect) | ("c", p1, c1, c2, p2)],
+        type: "f"|"s"|"fs", rect, color, fill (RGB 0..1), width, even_odd, closePath, opacities,
+        lineCap, lineJoin, dashes, seqno} - PyMuPDF-like, in our coordinates."""
+        from .objects import get_drawings
+        return get_drawings(self, rotated=rotated, clip=clip)
+
+    def get_struct_tree(self):
+        """Tagged PDF structure elements of this page: [{role, type, title, alt, actual_text,
+        lang, mcids, children}, ...] ([] when the page is not tagged)."""
+        from .tagged import struct_tree
+        return struct_tree(self)
+
+    @property
+    def is_tagged(self):
+        return bool(self.get_struct_tree())
 
     # ------------------------------------------------------------------ rendering
     def render(self, dpi=None, **kw):
@@ -764,6 +840,69 @@ class Page:
 import builtins as _builtins  # noqa: E402
 
 
+def _from_rawdict(d, option, dehyphenate=False, delimiters=None):
+    """Format a (re-ordered / annotated) rawdict as any get_text option (same rules as the
+    native formatters: words split at whitespace + delimiters, dehyphenation, block texts)."""
+    if option in ("rawdict", "rawjson"):
+        return _json.dumps(d, ensure_ascii=False) if option == "rawjson" else d
+    if option in ("dict", "json"):
+        for b in d["blocks"]:
+            for ln in b["lines"]:
+                for sp in ln["spans"]:
+                    if "chars" in sp:
+                        sp["text"] = "".join(c["c"] for c in sp.pop("chars"))
+                    sp.setdefault("text", "")
+                    # keep PyMuPDF key order: text before origin/bbox
+                    for k in ("origin", "bbox"):
+                        if k in sp:
+                            sp[k] = sp.pop(k)
+        return _json.dumps(d, ensure_ascii=False) if option == "json" else d
+    lines_txt = []
+    if option == "words":
+        brk = _WS | set(delimiters or "")
+        out = []
+        for b in d["blocks"]:
+            for li, ln in enumerate(b["lines"]):
+                wn, cur = 0, []
+                chars = [c for sp in ln["spans"] for c in sp["chars"]] + [None]
+                for ch in chars:
+                    if ch is None or ch["c"] in brk:
+                        if cur:
+                            bb = [c["bbox"] for c in cur]
+                            out.append([min(x[0] for x in bb), min(x[1] for x in bb), max(x[2] for x in bb),
+                                        max(x[3] for x in bb), "".join(c["c"] for c in cur), b["number"], li, wn])
+                            wn += 1
+                            cur = []
+                        continue
+                    cur.append(ch)
+        if dehyphenate:
+            merged = []
+            for w in out:
+                if (merged and merged[-1][4].endswith("-") and len(merged[-1][4]) > 1 and merged[-1][4][-2].isalpha()
+                        and merged[-1][5] == w[5] and merged[-1][6] == w[6] - 1 and w[7] == 0):
+                    merged[-1][4] = merged[-1][4][:-1] + w[4]
+                    continue
+                merged.append(w)
+            out = merged
+        return [tuple(w) for w in out]
+
+    def block_text(b):
+        s = ""
+        for ln in b["lines"]:
+            t = "".join(c["c"] for sp in ln["spans"] for c in sp["chars"])
+            if dehyphenate and t.endswith("-") and len(t) > 1 and t[-2].isalpha():
+                s += t[:-1]
+            else:
+                s += t + "\n"
+        return s
+    if option == "blocks":
+        return [(*b["bbox"], block_text(b), b["number"], 0) for b in d["blocks"]]
+    if option == "text":
+        return "".join(block_text(b) for b in d["blocks"])
+    del lines_txt
+    raise ValueError(f"unsupported option {option!r}")
+
+
 def _init_forms(pdf):
     """pdf.init_forms() without pypdfium2's "no XFA support" log line (AcroForm still works)."""
     import logging
@@ -905,10 +1044,23 @@ def _split_link_spans(d, links, keep_chars):
     for b in d["blocks"]:
         for ln in b["lines"]:
             new = []
+            lb = ln["bbox"]
+            near = [lk for lk in links if lk[0][0] <= lb[2] + 1 and lk[0][2] >= lb[0] - 1
+                    and lk[0][1] <= lb[3] + 1 and lk[0][3] >= lb[1] - 1]
             for sp in ln["spans"]:
                 chars = sp["chars"]
-                urls = (char_urls([c["bbox"] for c in chars], links, texts=[c["c"] for c in chars])
-                        if links else [""] * len(chars))
+                if not near and chars:   # fast path: no link near this line (span bbox == char union)
+                    ns = {key: v for key, v in sp.items() if key not in ("chars", "bbox", "origin", "text")}
+                    ns["bbox"] = sp["bbox"]
+                    ns["origin"] = chars[0]["origin"]
+                    ns["text"] = "".join(c["c"] for c in chars)
+                    ns["url"] = ""
+                    if keep_chars:
+                        ns["chars"] = chars
+                    new.append(ns)
+                    continue
+                urls = (char_urls([c["bbox"] for c in chars], near, texts=[c["c"] for c in chars])
+                        if near else [""] * len(chars))
                 start = 0
                 for k in range(1, len(chars) + 1):
                     if k == len(chars) or urls[k] != urls[start]:
@@ -1010,6 +1162,25 @@ def parallel_words(path, pages=None, processes=None, backend=None, **kw):
         pages = _page_list(pages, len(d))
         workers = processes or min(len(pages), _os.cpu_count() or 1)
         return d.extract("words", pages, workers, **kw)
+
+
+def to_markdown(source, pages=None, **kw):
+    """Markdown (or per-page chunks with page_chunks=True) of a path / bytes / Document; see
+    pdfwords.markdown.to_markdown."""
+    from .markdown import to_markdown as f
+    return f(source, pages, **kw)
+
+
+def chunks(source, pages=None, **kw):
+    """Heading-aware RAG chunks with page + bbox provenance; see pdfwords.markdown.chunks."""
+    from .markdown import chunks as f
+    return f(source, pages, **kw)
+
+
+def export(source, fmt="markdown", pages=None, **kw):
+    """Whole-document export: markdown | html | xhtml | xml | hocr | alto (see pdfwords.exporters)."""
+    from .exporters import export as f
+    return f(source, fmt, pages, **kw)
 
 
 def convert_from_path(pdf_path, dpi=200, **kw):

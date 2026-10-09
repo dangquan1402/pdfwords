@@ -6,7 +6,53 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - not yet released (version bumped in-tree; no tag or PyPI release)
+
 ### Added
+- **Markdown for LLMs** (`docs/LLM.md`): `pdfwords.to_markdown(src, pages, page_chunks,
+  sort, headers_footers, tables, images, image_dir, dpi, page_separators)` and
+  `page.get_text("markdown")`.
+  - Headings come from structure roles, the outline (TOC), font-size statistics and bold
+    lines. Repeated font headings are demoted, and levels are harmonised with the TOC.
+  - Also produced: lists (bullets, enumerators, nesting), code blocks, links, bold/italic,
+    tagged tables and image placeholders (with the tagged `/Alt` text).
+  - Running headers/footers, page numbers and vertical margin stamps are removed.
+  - `page_chunks=True` returns per-page dicts with elements, boxes and metadata.
+- `pdfwords.chunks(src, max_chars, min_chars, split_level, overlap)`: heading-aware RAG
+  chunks. Each chunk has its heading path, pages, and per-element page+bbox provenance.
+- **Tagged PDFs:**
+  - `page.is_tagged` and `page.get_struct_tree()` (roles, MCIDs, alt/actual text, lang).
+  - `get_text(sort="struct")`: structure-tree reading order, where untagged text keeps its
+    xycut slot and blocks are split at element changes.
+  - `get_text("dict", roles=True)`: block/span `role` and span `mcid`.
+  - Both backends are supported.
+- **Objects:**
+  - `page.get_images()` (alias `get_image_info`): boxes, quads, size, colour space,
+    filters, MCID, optional pixel digest.
+  - `page.get_image(n)`: the image as PIL.
+  - `page.get_drawings()`: vector paths as PyMuPDF-style items, colours, widths, dashes and
+    opacity; Form XObjects are included.
+- **Exports:**
+  - `pdfwords.export(src, fmt)` and `page.get_text(fmt)` for `html` (positioned), `xhtml`
+    (semantic, with data-page/data-bbox), `xml` (char level), `hocr` and `alto` (v4).
+  - hOCR and ALTO are in pixel units at `dpi`, so they align with `page.render(dpi=...)`.
+- **Integrations (optional extras):**
+  - `pdfwords.integrations.langchain.PdfwordsLoader` (`[langchain]`).
+  - `pdfwords.integrations.llama_index.PdfwordsReader` (`[llamaindex]`).
+  - `pdfwords mcp`: an MCP stdio server (`[mcp]`). Its read-only tools are pdf_info,
+    extract_text, to_markdown, search, get_links, get_tables and render_page. File access is
+    restricted to `--root` directories.
+- **New CLI subcommands:**
+  - `pdfwords export -f markdown|html|xhtml|xml|hocr|alto`;
+  - `pdfwords chunks` (JSON lines);
+  - `pdfwords objects --kind images|drawings|struct`;
+  - `--sort struct` and `--roles` on extraction.
+- **Benchmark suite:** `tools/bench_suite.py` and `docs/BENCHMARKS.md` compare speed, word F1
+  and reading-order concordance against pdftext, PyMuPDF, pdfplumber, pdf_oxide and raw
+  pypdfium2. Accuracy is measured on held-out synthetic ground truth.
+  `tools/make_synthetic.py` gained `--seed/--out-dir/--name`.
+- Test fixture: a hand-written tagged PDF (`tests/_featurepdf.py: tagged_pdf`) whose structure
+  order differs from its geometric order.
 - **Rendering on PDFium** (`docs/RENDERING.md`):
   - `Page.render(dpi | scale | size | max_side, clip, rotated, alpha, grayscale, annots, forms,
     background, antialias, output = numpy | pil | bytes | png | jpeg | webp | tiff, timeout,
@@ -38,6 +84,7 @@ All notable changes to this project are documented here. The format follows
   exact pixel scale. It also accepts `dpi=`.
 - Page geometry (`page.rect`, `rotation`) no longer extracts the page's text on the Rust
   backend.
+- The `extract` CLI `--sort` option gained `struct`.
 
 ## [0.2.0] - unreleased
 

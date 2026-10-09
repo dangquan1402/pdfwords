@@ -77,3 +77,57 @@ def text_pdf(content, pages=1):
         objs.append(_stream(content.replace(b"{n}", str(i).encode())))
     objs.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
     return _pdf(objs)
+
+
+def tagged_pdf():
+    """A tagged page whose structure order differs from the geometric order:
+    H1 "Annual Report" (top), then P "Alpha comes first logically." drawn LOWER (y=600) than
+    P "Beta is drawn higher on the page." (y=650); a list (L/LI x2), a 2x2 table (Table/TR/TD)
+    with ruling lines, an image (Figure), a page-number footer marked /Artifact."""
+    content = (
+        b"/H1 <</MCID 0>> BDC BT /F2 20 Tf 72 720 Td (Annual Report) Tj ET EMC\n"
+        b"/P <</MCID 2>> BDC BT /F1 11 Tf 72 650 Td (Beta is drawn higher on the page.) Tj ET EMC\n"
+        b"/P <</MCID 1>> BDC BT /F1 11 Tf 72 600 Td (Alpha comes first logically.) Tj ET EMC\n"
+        b"/LI <</MCID 3>> BDC BT /F1 11 Tf 72 560 Td (- First item) Tj ET EMC\n"
+        b"/LI <</MCID 4>> BDC BT /F1 11 Tf 72 545 Td (- Second item) Tj ET EMC\n"
+        b"/Artifact BMC 0.5 w 72 480 m 312 480 l S 72 455 m 312 455 l S 72 430 m 312 430 l S "
+        b"72 480 m 72 430 l S 192 480 m 192 430 l S 312 480 m 312 430 l S EMC\n"
+        b"/TD <</MCID 5>> BDC BT /F2 11 Tf 80 463 Td (Year) Tj ET EMC\n"
+        b"/TD <</MCID 6>> BDC BT /F2 11 Tf 200 463 Td (Revenue) Tj ET EMC\n"
+        b"/TD <</MCID 7>> BDC BT /F1 11 Tf 80 438 Td (2025) Tj ET EMC\n"
+        b"/TD <</MCID 8>> BDC BT /F1 11 Tf 200 438 Td (42) Tj ET EMC\n"
+        b"/Figure <</MCID 9>> BDC q 100 0 0 50 400 600 cm /Im1 Do Q EMC\n"
+        b"/Artifact BMC BT /F1 9 Tf 300 40 Td (1) Tj ET EMC\n")
+    objs = {}
+    objs[1] = (b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 6 0 R /MarkInfo << /Marked true >> "
+               b"/Lang (en-US) >>")
+    objs[2] = b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>"
+    objs[3] = (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /StructParents 0 "
+               b"/Resources << /Font << /F1 4 0 R /F2 5 0 R >> /XObject << /Im1 30 0 R >> >> /Contents 31 0 R >>")
+    objs[4] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
+    objs[5] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"
+    objs[6] = b"<< /Type /StructTreeRoot /K [7 0 R] /ParentTree 32 0 R >>"
+    objs[7] = b"<< /Type /StructElem /S /Document /P 6 0 R /K [8 0 R 9 0 R 10 0 R 11 0 R 14 0 R 21 0 R] >>"
+    elem = b"<< /Type /StructElem /S /%s /P %d 0 R /Pg 3 0 R /K %s >>"
+    objs[8] = elem % (b"H1", 7, b"0")
+    objs[9] = elem % (b"P", 7, b"1")       # Alpha (lower on the page) first
+    objs[10] = elem % (b"P", 7, b"2")      # Beta second
+    objs[11] = elem % (b"L", 7, b"[12 0 R 13 0 R]")
+    objs[12] = elem % (b"LI", 11, b"3")
+    objs[13] = elem % (b"LI", 11, b"4")
+    objs[14] = elem % (b"Table", 7, b"[15 0 R 16 0 R]")
+    objs[15] = elem % (b"TR", 14, b"[17 0 R 18 0 R]")
+    objs[16] = elem % (b"TR", 14, b"[19 0 R 20 0 R]")
+    objs[17] = elem % (b"TH", 15, b"5")
+    objs[18] = elem % (b"TH", 15, b"6")
+    objs[19] = elem % (b"TD", 16, b"7")
+    objs[20] = elem % (b"TD", 16, b"8")
+    objs[21] = (b"<< /Type /StructElem /S /Figure /P 7 0 R /Pg 3 0 R /K 9 /Alt (A red square) >>")
+    for i in range(22, 30):
+        objs[i] = b"null"
+    px = b"\xff\x00\x00" * 4
+    objs[30] = _stream(px, b"/Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB "
+                           b"/BitsPerComponent 8")
+    objs[31] = _stream(content)
+    objs[32] = (b"<< /Nums [0 [8 0 R 9 0 R 10 0 R 12 0 R 13 0 R 17 0 R 18 0 R 19 0 R 20 0 R 21 0 R]] >>")
+    return _pdf([objs[i] for i in range(1, 33)])

@@ -11,6 +11,10 @@
     pdfwords pdftext file.pdf [--json] [--sort] [--keep_hyphens] [--page_range 0,5-10] ...
     pdfwords render file.pdf [--pages 0,2-4] [--dpi 150] [--fmt jpeg|png|webp] [--out-dir out/] [--workers 8]
     pdfwords render file.pdf --pages 0 --overlay words,blocks -o debug.png
+    pdfwords export file.pdf [--format markdown|html|xhtml|xml|hocr|alto] [--pages ...] [-o out.md]
+    pdfwords chunks file.pdf [--max-chars 2000] [--overlap 0]      # JSON lines with page+bbox provenance
+    pdfwords objects file.pdf [--pages 0] [--kind images|drawings|struct]
+    pdfwords mcp [--root DIR]                                      # MCP server (stdio) for LLM agents
 """
 import argparse
 import json
@@ -19,7 +23,7 @@ import sys
 import pdfwords
 
 SUBCOMMANDS = ("extract", "redact", "insert-text", "contents", "debug", "links", "annots", "toc", "quality",
-               "search", "pdftext", "render")
+               "search", "pdftext", "render", "export", "chunks", "objects", "mcp")
 
 
 def _pages(spec, n):
@@ -65,7 +69,9 @@ def extract(argv):
     ap.add_argument("pdf")
     ap.add_argument("--mode", default="words", choices=["text", "words", "blocks", "dict", "rawdict"])
     ap.add_argument("--pages", help="0-based, e.g. 0,2-4")
-    ap.add_argument("--sort", default="none", choices=["none", "simple", "xycut"])
+    ap.add_argument("--sort", default="none", choices=["none", "simple", "xycut", "struct"],
+                    help="struct: tagged-PDF structure order (untagged text keeps xycut order)")
+    ap.add_argument("--roles", action="store_true", help="dict/rawdict: add structure roles (P, H1, LI, ...)")
     ap.add_argument("--backend", default=None, choices=["rust", "python"], help="default: rust if built")
     ap.add_argument("--rotated", action="store_true", help="coordinates on the displayed (rotated) page")
     ap.add_argument("--ligatures", action="store_true", help="re-compose ligature glyphs into U+FB0x chars")
@@ -76,10 +82,12 @@ def extract(argv):
     ap.add_argument("--password")
     ap.add_argument("-o", "--out")
     a = ap.parse_args(argv)
-    sort = {"none": False, "simple": True, "xycut": "xycut"}[a.sort]
+    sort = {"none": False, "simple": True, "xycut": "xycut", "struct": "struct"}[a.sort]
     kw = dict(sort=sort, rotated=a.rotated, ligatures=a.ligatures)
     if a.mode in ("dict", "rawdict"):
         kw["links"] = a.links
+        if a.roles:
+            kw["roles"] = True
     else:
         kw["dehyphenate"] = a.dehyphenate
     with pdfwords.open(a.pdf, a.password, backend=a.backend, flatten=a.flatten) as doc:
@@ -356,13 +364,72 @@ def pdftext_cli(argv):
     _out(s, a.out_path)
 
 
+def export_cli(argv):
+    from pdfwords.exporters import FORMATS
+    ap = argparse.ArgumentParser(prog="pdfwords export", description="Markdown / HTML / XHTML / XML / hOCR / ALTO")
+    ap.add_argument("pdf")
+    ap.add_argument("-f", "--format", default="markdown", choices=FORMATS + ("md",))
+    ap.add_argument("--pages")
+    ap.add_argument("--sort", default="auto", help="auto (struct if tagged, else xycut) | xycut | struct")
+    ap.add_argument("--dpi", type=float, default=72, help="hOCR / ALTO pixel units")
+    ap.add_argument("--no-headers-footers", action="store_true", help="markdown: keep running headers/footers")
+    ap.add_argument("--no-tables", action="store_true", help="markdown: no table detection")
+    ap.add_argument("--image-dir", help="markdown: write page images here and link them")
+    ap.add_argument("--page-separators", action="store_true", help="markdown: <!-- page N --> markers")
+    ap.add_argument("--password")
+    ap.add_argument("-o", "--out")
+    a = ap.parse_args(argv)
+    fmt = "markdown" if a.format == "md" else a.format
+    kw = {}
+    if fmt in ("markdown", "xhtml"):
+        kw = dict(headers_footers=not a.no_headers_footers, tables=not a.no_tables)
+        if fmt == "markdown":
+            kw.update(page_separators=a.page_separators)
+            if a.image_dir:
+                kw.update(images=True, image_dir=a.image_dir)
+    with pdfwords.open(a.pdf, a.password) as doc:
+        s = pdfwords.export(doc, fmt, _pages(a.pages, len(doc)), sort=a.sort, dpi=a.dpi, **kw)
+    _out(s, a.out)
+
+
+def chunks_cli(argv):
+    ap = argparse.ArgumentParser(prog="pdfwords chunks", description="heading-aware chunks (JSON lines)")
+    ap.add_argument("pdf")
+    ap.add_argument("--pages")
+    ap.add_argument("--max-chars", type=int, default=2000)
+    ap.add_argument("--min-chars", type=int, default=200)
+    ap.add_argument("--overlap", type=int, default=0)
+    ap.add_argument("--split-level", type=int, default=2)
+    ap.add_argument("--password")
+    ap.add_argument("-o", "--out")
+    a = ap.parse_args(argv)
+    with pdfwords.open(a.pdf, a.password) as doc:
+        cs = pdfwords.chunks(doc, _pages(a.pages, len(doc)), max_chars=a.max_chars, min_chars=a.min_chars,
+                             overlap=a.overlap, split_level=a.split_level)
+    _out("\n".join(json.dumps(c, ensure_ascii=False) for c in cs), a.out)
+
+
+def objects_cli(argv):
+    _per_page(argv, "objects", lambda p, a: {a.kind: {
+        "images": lambda: p.get_images(rotated=a.rotated, hashes=True),
+        "drawings": lambda: p.get_drawings(rotated=a.rotated),
+        "struct": lambda: p.get_struct_tree()}[a.kind]()},
+        lambda ap: ap.add_argument("--kind", default="images", choices=["images", "drawings", "struct"]))
+
+
+def mcp_cli(argv):
+    from pdfwords.mcp_server import main as m
+    m(argv)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in SUBCOMMANDS:
         cmd, rest = argv[0], argv[1:]
         return {"extract": extract, "redact": redact, "insert-text": insert_text, "contents": contents,
                 "debug": debug, "links": links, "annots": annots, "toc": toc, "quality": quality,
-                "search": search, "pdftext": pdftext_cli, "render": render}[cmd](rest)
+                "search": search, "pdftext": pdftext_cli, "render": render, "export": export_cli,
+                "chunks": chunks_cli, "objects": objects_cli, "mcp": mcp_cli}[cmd](rest)
     return extract(argv)
 
 
