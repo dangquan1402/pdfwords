@@ -1,0 +1,57 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "pdfwords"
+version = "0.1.0"
+description = "PyMuPDF-compatible text extraction with char/word/line/block bounding boxes, built on PDFium. Apache-2.0, optional Rust core."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Quan Dang" }]
+requires-python = ">=3.9"
+dependencies = ["pypdfium2>=4.30"]
+keywords = ["pdf", "text-extraction", "bounding-box", "pdfium", "pymupdf", "ocr", "layout"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Text Processing",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+numpy = ["numpy"]
+# pymupdf (AGPL) is only used by the optional accuracy tests/benchmarks, never at runtime
+test = ["pytest>=7", "numpy"]
+compare = ["pymupdf", "pdftext"]
+
+[project.urls]
+Homepage = "https://github.com/dangquan1402/pdfwords"
+Repository = "https://github.com/dangquan1402/pdfwords"
+Issues = "https://github.com/dangquan1402/pdfwords/issues"
+Changelog = "https://github.com/dangquan1402/pdfwords/blob/main/CHANGELOG.md"
+
+[project.scripts]
+pdfwords = "pdfwords.__main__:main"
+
+[tool.maturin]
+python-source = "python"
+module-name = "pdfwords._native"
+manifest-path = "crates/pdfwords-py/Cargo.toml"
+features = ["extension-module"]
+include = [{ path = "LICENSE", format = "sdist" }, { path = "NOTICE", format = "sdist" }]
+exclude = ["**/__pycache__/**", "**/*.pyc", "python/pdfwords/*.so", "python/pdfwords/*.pyd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

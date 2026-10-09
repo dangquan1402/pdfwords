@@ -1,0 +1,23 @@
+# Rust
+/target/
+**/*.rs.bk
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+# compiled extension built in-tree by `maturin develop`
+python/pdfwords/*.so
+python/pdfwords/*.pyd
+python/pdfwords/*.dylib
+# downloaded test documents
+tests/data/
+# local outputs
+out/
+*.part
+.DS_Store

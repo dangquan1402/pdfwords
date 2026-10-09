@@ -1,0 +1,19 @@
+[package]
+name = "pdfwords-core"
+description = "Text extraction with char/word/line/block bounding boxes (PyMuPDF-compatible layout) on top of PDFium. Pure Rust, no Python."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["pdf", "text-extraction", "pdfium", "bounding-box", "layout"]
+categories = ["text-processing", "parsing"]
+
+[dependencies]
+libloading = "0.8"
+regex = { version = "1", default-features = false, features = ["std", "unicode-case", "unicode-perl"] }
+unicode-bidi = { version = "0.3", default-features = false, features = ["hardcoded-data"] }
+unicode-general-category = "1"

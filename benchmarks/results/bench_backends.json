@@ -1,0 +1,117 @@
+[
+ {
+  "pdf": "arxiv_attention.pdf",
+  "pages": 15,
+  "rust_words": 5.93,
+  "rust_words_numpy": 5.72,
+  "rust_rawdict": 7.47,
+  "python_words": 17.39,
+  "python_rawdict": 19.41,
+  "pymupdf_words": 5.18,
+  "pymupdf_rawdict": 15.61,
+  "pdftext": 28.6,
+  "breakdown_ms_total": {
+   "load_page": 58.54,
+   "load_text": 10.61,
+   "chars": 2.11,
+   "close": 4.24,
+   "layout": 1.66,
+   "words": 0.48,
+   "py_conversion": 2.91,
+   "n_glyphs": 33495,
+   "n_words": 6106
+  }
+ },
+ {
+  "pdf": "arxiv_resnet.pdf",
+  "pages": 12,
+  "rust_words": 3.96,
+  "rust_words_numpy": 3.85,
+  "rust_rawdict": 6.89,
+  "python_words": 25.95,
+  "python_rawdict": 30.11,
+  "pymupdf_words": 4.43,
+  "pymupdf_rawdict": 8.08,
+  "pdftext": 39.39,
+  "breakdown_ms_total": {
+   "load_page": 25.81,
+   "load_text": 12.13,
+   "chars": 2.94,
+   "close": 0.75,
+   "layout": 1.64,
+   "words": 0.69,
+   "py_conversion": 1.44,
+   "n_glyphs": 49917,
+   "n_words": 9813
+  }
+ },
+ {
+  "pdf": "irs_w9.pdf",
+  "pages": 6,
+  "rust_words": 2.86,
+  "rust_words_numpy": 2.81,
+  "rust_rawdict": 6.54,
+  "python_words": 32.86,
+  "python_rawdict": 36.6,
+  "pymupdf_words": 3.26,
+  "pymupdf_rawdict": 7.04,
+  "pdftext": 41.92,
+  "breakdown_ms_total": {
+   "load_page": 4.44,
+   "load_text": 7.03,
+   "chars": 1.64,
+   "close": 0.4,
+   "layout": 0.98,
+   "words": 0.46,
+   "py_conversion": 1.05,
+   "n_glyphs": 37304,
+   "n_words": 6273
+  }
+ },
+ {
+  "pdf": "table_camelot.pdf",
+  "pages": 1,
+  "rust_words": 3.23,
+  "rust_words_numpy": 3.47,
+  "rust_rawdict": 4.62,
+  "python_words": 16.9,
+  "python_rawdict": 17.99,
+  "pymupdf_words": 3.87,
+  "pymupdf_rawdict": 5.19,
+  "pdftext": 20.56,
+  "breakdown_ms_total": {
+   "load_page": 1.66,
+   "load_text": 0.81,
+   "chars": 0.17,
+   "close": 0.05,
+   "layout": 0.09,
+   "words": 0.03,
+   "py_conversion": 0.08,
+   "n_glyphs": 2642,
+   "n_words": 423
+  }
+ },
+ {
+  "pdf": "simple_text.pdf",
+  "pages": 2,
+  "rust_words": 1.18,
+  "rust_words_numpy": 1.22,
+  "rust_rawdict": 1.84,
+  "python_words": 5.97,
+  "python_rawdict": 6.5,
+  "pymupdf_words": 1.55,
+  "pymupdf_rawdict": 1.91,
+  "pdftext": 7.88,
+  "breakdown_ms_total": {
+   "load_page": 1.06,
+   "load_text": 0.75,
+   "chars": 0.11,
+   "close": 0.01,
+   "layout": 0.06,
+   "words": 0.02,
+   "py_conversion": 0.05,
+   "n_glyphs": 2146,
+   "n_words": 315
+  }
+ }
+]

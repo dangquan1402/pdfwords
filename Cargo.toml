@@ -1,0 +1,17 @@
+[workspace]
+members = ["crates/pdfwords-core", "crates/pdfwords-py"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "Apache-2.0"
+authors = ["Quan Dang"]
+repository = "https://github.com/dangquan1402/pdfwords"
+homepage = "https://github.com/dangquan1402/pdfwords"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
