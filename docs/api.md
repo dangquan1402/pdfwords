@@ -27,6 +27,14 @@ API and output.
 
 ::: pdfwords.convert_from_bytes
 
+## Shrinking (pdfwords[shrink])
+
+::: pdfwords.optimize
+
+::: pdfwords.shrink.optimize
+
+::: pdfwords.shrink.OptimizeReport
+
 ## Tables
 
 ::: pdfwords.table_detect

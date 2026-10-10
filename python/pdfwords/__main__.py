@@ -17,6 +17,7 @@
     pdfwords tables file.pdf [--pages 0] [-f json|markdown|csv] [--strategy auto|lines|text]
     pdfwords frame file.pdf -o words.parquet [--kind chars|spans|lines|words|blocks]  # or -o x.csv
     pdfwords file.pdf --ocr auto [--ocr-engine tesseract|rapidocr|ocrmac] [--ocr-lang eng]
+    pdfwords shrink in.pdf -o out.pdf [--preset lossless|balanced|max] [--ocr] [--report report.json]
     pdfwords mcp [--root DIR]                                      # MCP server (stdio) for LLM agents
 """
 import argparse
@@ -28,7 +29,7 @@ import pdfwords
 
 SUBCOMMANDS = ("extract", "redact", "insert-text", "contents", "debug", "links", "annots", "toc", "quality",
                "search", "pdftext", "render", "export", "chunks", "objects", "mcp",
-               "tables", "frame")
+               "tables", "frame", "shrink")
 
 
 def _ocr_args(ap):
@@ -499,6 +500,49 @@ def frame_cli(argv):
             frames.to_parquet(doc, a.out, a.kind, pages, **kw)
 
 
+def shrink_cli(argv):
+    ap = argparse.ArgumentParser(prog="pdfwords shrink", description="make a PDF smaller while keeping text, "
+                                 "vectors, links, annotations, forms, outlines and tags (needs pdfwords[shrink])")
+    ap.add_argument("pdf")
+    ap.add_argument("-o", "--out", required=True, help="output PDF")
+    ap.add_argument("--preset", default="balanced", choices=["lossless", "balanced", "max"])
+    ap.add_argument("--dpi", type=float, dest="target_dpi", help="target image resolution (default 150 / max 100)")
+    ap.add_argument("--quality", type=int, dest="jpeg_quality", help="JPEG quality 1-95 (default 72 / max 55)")
+    ap.add_argument("--grayscale", default="auto", choices=["auto", "always", "never"])
+    ap.add_argument("--mrc", default="auto", choices=["auto", "always", "never"],
+                    help="mixed raster content for scanned pages")
+    ap.add_argument("--ocr", nargs="?", const="auto", default=None,
+                    help="add an invisible OCR text layer to pages without text (optional engine name)")
+    ap.add_argument("--strip-metadata", action="store_true", help="drop the XMP packet and the Info dict")
+    ap.add_argument("--keep-thumbnails", action="store_true")
+    ap.add_argument("--no-dedupe", action="store_true")
+    ap.add_argument("--min-ssim", type=float)
+    ap.add_argument("--max-raster-fallback", type=int, help="max pages to rasterise (-1 = no limit)")
+    ap.add_argument("--no-verify", action="store_true", help="skip the PDFium before/after page render check")
+    ap.add_argument("--linearize", action="store_true", help="fast web view")
+    ap.add_argument("--password")
+    ap.add_argument("--report", help="write the JSON report here ('-' = stdout)")
+    ap.add_argument("-q", "--quiet", action="store_true")
+    a = ap.parse_args(argv)
+    try:
+        from pdfwords.shrink import optimize
+    except ImportError as e:
+        sys.exit(str(e))
+    tri = {"auto": "auto", "always": True, "never": False}
+    rep = optimize(a.pdf, a.out, a.preset, password=a.password, target_dpi=a.target_dpi,
+                   jpeg_quality=a.jpeg_quality, grayscale=tri[a.grayscale], mrc=tri[a.mrc],
+                   ocr=False if a.ocr is None else (True if a.ocr == "auto" else a.ocr),
+                   strip_metadata=True if a.strip_metadata else None, remove_thumbnails=not a.keep_thumbnails,
+                   dedupe=not a.no_dedupe, min_ssim=a.min_ssim, max_raster_fallback=a.max_raster_fallback,
+                   verify=not a.no_verify, linearize=a.linearize)
+    if a.report:
+        _out(json.dumps(rep.to_dict(), indent=1, ensure_ascii=False), None if a.report == "-" else a.report)
+    if not a.quiet:
+        note = f" (kept original: {rep.reason})" if rep.kept_original else ""
+        print(f"{a.pdf}: {rep.bytes_before:,} -> {rep.bytes_after:,} bytes ({rep.reduction:.1%} smaller) "
+              f"in {rep.seconds:.2f}s{note}", file=sys.stderr)
+
+
 def mcp_cli(argv):
     from pdfwords.mcp_server import main as m
     m(argv)
@@ -512,7 +556,7 @@ def main(argv=None):
                 "debug": debug, "links": links, "annots": annots, "toc": toc, "quality": quality,
                 "search": search, "pdftext": pdftext_cli, "render": render, "export": export_cli,
                 "chunks": chunks_cli, "objects": objects_cli, "mcp": mcp_cli,
-                "tables": tables_cli, "frame": frame_cli}[cmd](rest)
+                "tables": tables_cli, "frame": frame_cli, "shrink": shrink_cli}[cmd](rest)
     return extract(argv)
 
 

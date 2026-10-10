@@ -46,6 +46,10 @@ mcp = ["mcp>=1.2; python_version >= '3.10'"]
 # rendering for OCR needs numpy + Pillow
 ocr = ["pytesseract>=0.3.10", "numpy", "pillow>=9"]
 ocr-rapid = ["rapidocr_onnxruntime>=1.3", "numpy", "pillow>=9"]
+# structure-preserving size optimiser (pdfwords.optimize / pdfwords shrink): pikepdf (MPL-2.0, used
+# unmodified), Pillow (HPND), numpy (BSD-3), mozjpeg-lossless-optimization (BSD-3). JBIG2 (jbig2enc CLI)
+# and a MozJPEG cjpeg are optional, auto-detected executables.
+shrink = ["pikepdf>=8", "pillow>=9", "numpy", "mozjpeg-lossless-optimization>=1.1"]
 # Table.to_pandas / doc.to_pandas (BSD-3) and Arrow / Parquet output (Apache-2.0)
 tables = ["pandas>=1.3"]
 arrow = ["pyarrow>=10"]

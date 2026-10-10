@@ -6,6 +6,49 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Planned as 0.5.0.
+
+### Added
+- **Structure-preserving PDF shrinking:** `pdfwords.optimize(src, out, preset=...)`,
+  `Document.optimize()` and `pdfwords shrink in.pdf -o out.pdf`. Installed with the new
+  `shrink` extra: pikepdf (MPL-2.0, used unmodified), Pillow, numpy and
+  mozjpeg-lossless-optimization (BSD-3). See docs/SHRINK.md.
+  - Text, vector graphics, fonts, links, annotations, form fields, outlines and the structure
+    tree are kept. Only images are re-encoded.
+  - Images are resampled to a target DPI using the size they are drawn at, taken from
+    `Page.get_images()`.
+  - JPEG with an SSIM floor per image. Images that are effectively gray become gray.
+  - Line art stays lossless.
+  - 1-bit images become CCITT G4 (always available through Pillow's libtiff). JBIG2 generic
+    coding is used when the `jbig2` executable from jbig2enc is installed.
+  - MRC for scanned pages: a 1-bit text mask, a low-resolution background JPEG, and a solid or
+    low-resolution foreground colour. Pages are classified with `text_quality()`.
+  - Byte-identical streams (fonts, images, ICC profiles) are merged. Thumbnails, per-object
+    XMP and PieceInfo are dropped. Oversized CMYK ICC profiles can be replaced.
+  - The output uses object streams and level-9 Flate. Linearisation is optional.
+  - Presets: `lossless`, `balanced` and `max`. Overrides: `target_dpi`, `jpeg_quality`,
+    `grayscale`, `mrc`, `ocr`, `strip_metadata`, `remove_thumbnails`, `dedupe`, `min_ssim`,
+    `max_raster_fallback`, `verify`, `linearize`, `progress`.
+  - `max` can rasterise pages whose vector content is very heavy (for example, CAD plans)
+    when the raster is less than half the size. The text is kept as an invisible layer.
+  - `ocr=True` adds an invisible text layer to pages without text, using the pdfwords OCR
+    adapters.
+  - After re-encoding, changed pages are rendered with PDFium before and after. Images on
+    pages below the preset's page-SSIM floor are restored.
+  - The output is never larger than the input. Signed and encrypted PDFs are returned
+    unchanged.
+  - Returns an `OptimizeReport`: bytes before and after, a decision for each image (action,
+    effective DPI, SSIM, sizes), rasterised pages, OCR pages, page checks and counters.
+    `--report report.json` writes it as JSON.
+- `benchmarks/bench_shrink.py`: size, SSIM, word recall and time per page for each preset,
+  with optional Ghostscript and qpdf reference runs.
+- CI runs the shrink tests. One job installs `jbig2` and `qpdf` from apt, and the CLI smoke
+  test runs `pdfwords shrink`.
+
+### Fixed
+- `Page.widgets()` raised `AttributeError` on documents without an AcroForm. It now returns
+  `[]`.
+
 ## [0.4.1] - 2026-10-10
 
 Documentation and packaging release. The library code is unchanged from 0.4.0.
