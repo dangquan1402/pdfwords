@@ -6,7 +6,41 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.4.0] - not yet released (version bumped in-tree; no tag or PyPI release)
+## [0.4.1] - 2026-10-10
+
+Documentation and packaging release. The library code is unchanged from 0.4.0.
+
+### Added
+- **Documentation site:** https://pdfwords.readthedocs.io, built with MkDocs Material.
+  - Pages: home, quickstart, guides (editing, pdftext migration, LLM output, tables, OCR,
+    rendering), benchmarks, design notes, thresholds, the WASM spike, and the changelog.
+  - The API reference is generated with mkdocstrings from the Python docstrings, statically,
+    so no package build is needed.
+  - The home, quickstart and changelog pages are generated from README.md and CHANGELOG.md.
+  - Configured by `.readthedocs.yaml`; the build dependencies are in `docs/requirements.txt`
+    and the `docs` extra.
+- A `Documentation` URL in the package metadata, plus Read the Docs and PyPI badges in the
+  README.
+- uv instructions next to pip ones: `uv add pdfwords`, `uv pip install pdfwords`,
+  `uvx pdfwords ...`, `uv tool install pdfwords`, and the same for extras.
+  - The README has an extras table with licences.
+  - The Editing, LLM and OCR guides show uv commands, including an MCP config that runs
+    through `uvx`.
+  - The contributor setup uses `uv sync --extra test` / `uv run pytest`.
+- CI:
+  - a `uv` job (`uv sync` editable maturin build, `uv run pytest`, `uvx --from .`);
+  - a `docs` job (`mkdocs build --strict`).
+
+### Fixed
+- The `mcp` extra now carries a `python_version >= '3.10'` marker. The MCP SDK needs
+  Python 3.10+, and without the marker `uv sync`/`uv lock` could not resolve the 3.9 split of
+  this project.
+
+### Changed
+- CI and release runners are pinned to `ubuntu-24.04` instead of `ubuntu-latest`, ahead of
+  the move to Ubuntu 26. Linux wheels are still built in the manylinux_2_28 container.
+
+## [0.4.0] - 2026-10-10
 
 ### Added
 - **Table detection** (`docs/TABLES.md`): `page.find_tables(clip, strategy="auto"|"lines"|"text",
@@ -50,7 +84,7 @@ All notable changes to this project are documented here. The format follows
   - `action-gh-release@v3`.
 - CI now runs Tesseract and RapidOCR tests and smoke-tests the new CLIs.
 
-## [0.3.0] - not yet released (version bumped in-tree; no tag or PyPI release)
+## [0.3.0] - not released separately (first published as part of 0.4.0)
 
 ### Added
 - **Markdown for LLMs** (`docs/LLM.md`): `pdfwords.to_markdown(src, pages, page_chunks,
@@ -130,7 +164,7 @@ All notable changes to this project are documented here. The format follows
   backend.
 - The `extract` CLI `--sort` option gained `struct`.
 
-## [0.2.0] - unreleased
+## [0.2.0] - not released separately (first published as part of 0.4.0)
 
 ### Added
 - **Editing** (optional extra `pdfwords[edit]`: pypdf, fontTools, Pillow; all permissive):
