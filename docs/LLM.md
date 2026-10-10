@@ -100,11 +100,11 @@ overlays and digitisation pipelines. All XML outputs are well-formed (tested).
 ## Integrations (optional extras)
 
 ```python
-# pip install "pdfwords[langchain]"
+# pip install "pdfwords[langchain]"   (uv: uv add "pdfwords[langchain]")
 from pdfwords.integrations.langchain import PdfwordsLoader
 docs = PdfwordsLoader("paper.pdf", mode="chunks", max_chars=1500).load()
 
-# pip install "pdfwords[llamaindex]"
+# pip install "pdfwords[llamaindex]"   (uv: uv add "pdfwords[llamaindex]")
 from pdfwords.integrations.llama_index import PdfwordsReader
 docs = PdfwordsReader(mode="markdown_page").load_data("paper.pdf")
 ```
@@ -115,7 +115,7 @@ docs = PdfwordsReader(mode="markdown_page").load_data("paper.pdf")
 ### MCP server
 
 ```bash
-pip install "pdfwords[mcp]"
+pip install "pdfwords[mcp]"        # or: uv add "pdfwords[mcp]"
 pdfwords mcp --root ~/Documents      # stdio transport
 ```
 
@@ -123,6 +123,12 @@ Claude Desktop / IDE config:
 
 ```json
 {"mcpServers": {"pdfwords": {"command": "pdfwords", "args": ["mcp", "--root", "/Users/me/Documents"]}}}
+```
+
+Or, with nothing installed, have uv fetch it on demand:
+
+```json
+{"mcpServers": {"pdfwords": {"command": "uvx", "args": ["--from", "pdfwords[mcp]", "pdfwords", "mcp", "--root", "/Users/me/Documents"]}}}
 ```
 
 Read-only tools: `pdf_info` (pages, metadata, TOC, tagged, pages needing OCR), `extract_text`

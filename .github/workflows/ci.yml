@@ -37,6 +37,22 @@ jobs:
           export PDFWORDS_PDFIUM_LIB="$(python -c 'import os, pypdfium2_raw; print(os.path.join(os.path.dirname(pypdfium2_raw.__file__), "libpdfium.so"))')"
           cargo test --workspace
 
+  uv:
+    name: uv (sync, run, uvx)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: uv sync (editable maturin build) + tests
+        run: |
+          uv sync --extra test
+          uv run python -c "import pdfwords; assert 'rust' in pdfwords.available_backends(), pdfwords.available_backends()"
+          uv run pytest -q -ra tests/test_basic.py tests/test_parity.py
+      - name: uvx CLI from the checkout
+        run: uvx --from . pdfwords tests/fixtures/simple_text.pdf --mode text --pages 0 | grep -q "Simple test document"
+
   python:
     name: Python ${{ matrix.python }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

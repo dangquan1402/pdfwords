@@ -41,7 +41,7 @@ render = ["numpy", "pillow>=9"]
 # LLM integrations (all MIT): LangChain document loader, LlamaIndex reader, MCP server
 langchain = ["langchain-core>=0.2"]
 llamaindex = ["llama-index-core>=0.10"]
-mcp = ["mcp>=1.2"]
+mcp = ["mcp>=1.2; python_version >= '3.10'"]
 # OCR fallback (Apache-2.0): Tesseract via pytesseract (needs the tesseract binary) or RapidOCR;
 # rendering for OCR needs numpy + Pillow
 ocr = ["pytesseract>=0.3.10", "numpy", "pillow>=9"]

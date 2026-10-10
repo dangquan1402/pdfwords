@@ -21,3 +21,4 @@ tests/data/
 out/
 *.part
 .DS_Store
+uv.lock

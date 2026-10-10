@@ -21,11 +21,18 @@ pdfwords frame scan.pdf -o words.parquet --ocr always
 
 ## Engines
 
-All engines are optional, and `"auto"` picks the first one installed.
+All engines are optional, and `"auto"` picks the first one installed. The extras install
+them with rendering support:
+
+* `pip install "pdfwords[ocr]"` or `uv add "pdfwords[ocr]"` for Tesseract (also install the
+  tesseract binary: `apt install tesseract-ocr` or `brew install tesseract`);
+* `pdfwords[ocr-rapid]` for RapidOCR.
+
+For a one-off run: `uvx --from "pdfwords[ocr]" pdfwords scan.pdf --ocr always`.
 
 | Engine | Install | Licence | Notes |
 |---|---|---|---|
-| `ocrmac` | `pip install ocrmac` (macOS) | MIT (Apple Vision) | Tried first on macOS. Line-level boxes. |
+| `ocrmac` | `pip install ocrmac` / `uv add ocrmac` (macOS) | MIT (Apple Vision) | Tried first on macOS. Line-level boxes. |
 | `rapidocr` | `pip install rapidocr_onnxruntime` (or `rapidocr` ≥ 2) | Apache-2.0 | Pure pip, CPU, line-level boxes. |
 | `tesseract` | `pip install pytesseract` + the tesseract binary | Apache-2.0 | Word boxes, block/line structure, many languages. |
 | callable | `f(PIL.Image) -> [(text, conf 0-1 or None, (x0, y0, x1, y1) px), ...]` | yours | Plug in any engine, cloud API or layout model. |
