@@ -1,6 +1,8 @@
 # pdfwords
 
 [![CI](https://github.com/dangquan1402/pdfwords/actions/workflows/ci.yml/badge.svg)](https://github.com/dangquan1402/pdfwords/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/pdfwords.svg)](https://pypi.org/project/pdfwords/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pdfwords.svg)](https://pypi.org/project/pdfwords/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **PDF text extraction with character, word, line and block bounding boxes.** Its output matches
@@ -24,24 +26,60 @@ conventions:
 
 ## Install
 
+Prebuilt abi3 wheels (one per platform, any CPython ≥ 3.9) cover:
+
+* Linux x86_64 and aarch64 (manylinux 2.28);
+* macOS x86_64 and arm64;
+* Windows x64.
+
+They bundle the Rust backend. With [pip](https://pip.pypa.io) or [uv](https://docs.astral.sh/uv/):
+
 ```bash
-pip install pdfwords            # once published to PyPI (abi3 wheels: Linux, macOS, Windows)
+pip install pdfwords                 # pip
+uv add pdfwords                      # uv project (adds it to pyproject.toml + uv.lock)
+uv pip install pdfwords              # uv, into the active virtualenv
+
+pip install "pdfwords[edit,ocr]"     # extras (see below)
+uv add "pdfwords[edit,ocr]"
+
+uvx pdfwords file.pdf --mode text    # one-off CLI run, no install (uv tool run)
+uv tool install pdfwords             # or keep the `pdfwords` command on PATH
 ```
 
-From source (needs a Rust toolchain for the fast backend):
+> **PyPI status:** the first PyPI release (0.4.0) is waiting on the trusted-publisher setup.
+> Until it appears on PyPI, install the tagged release from GitHub. This builds the Rust
+> extension, so it needs a Rust toolchain:
+> `pip install "pdfwords @ git+https://github.com/dangquan1402/pdfwords@v0.4.0"`,
+> `uv add "pdfwords @ git+https://github.com/dangquan1402/pdfwords@v0.4.0"` or
+> `uvx --from git+https://github.com/dangquan1402/pdfwords@v0.4.0 pdfwords --help`.
+
+From a checkout (needs a Rust toolchain for the fast backend):
 
 ```bash
 git clone https://github.com/dangquan1402/pdfwords && cd pdfwords
-pip install .                   # builds the Rust extension with maturin
+pip install .                        # or: uv pip install .   (builds the Rust extension with maturin)
+uv sync --extra test && uv run pytest   # dev environment with uv (editable build)
 # or, pure Python only (no Rust needed): put python/ on the path
 PYTHONPATH=python python -c "import pdfwords; print(pdfwords.available_backends())"   # ['python']
 ```
 
-The only runtime dependency is `pypdfium2`. `numpy` is optional, for `Page.words_array()`.
-Editing (content streams, redaction, text insertion) needs the `edit` extra:
-`pip install "pdfwords[edit]"`. It adds pypdf (BSD-3-Clause), fontTools (MIT) and
-Pillow (MIT-CMU). Other optional extras: `ocr` (pytesseract; RapidOCR via `ocr-rapid`),
-`tables` (pandas), `arrow` (pyarrow), `render`, `langchain`, `llamaindex`, `mcp`.
+The only runtime dependency is `pypdfium2`. The optional extras are:
+
+| Extra | Adds | Licence |
+|---|---|---|
+| `edit` | content streams, redaction, text insertion: pypdf, fontTools, Pillow | BSD-3 / MIT / MIT-CMU |
+| `render` | numpy, Pillow | BSD / MIT-CMU |
+| `ocr` | pytesseract (plus the tesseract binary), numpy, Pillow | Apache-2.0 |
+| `ocr-rapid` | RapidOCR | Apache-2.0 |
+| `tables` | pandas | BSD-3 |
+| `arrow` | pyarrow | Apache-2.0 |
+| `langchain` | langchain-core | MIT |
+| `llamaindex` | llama-index-core | MIT |
+| `mcp` | the MCP SDK (Python ≥ 3.10) | MIT |
+| `numpy` | numpy, for `Page.words_array()` | BSD |
+
+Install any of them the same way: `pip install "pdfwords[tables,arrow]"` or
+`uv add "pdfwords[tables,arrow]"`.
 
 ## Quick start
 
@@ -195,7 +233,7 @@ ms/page, whole documents, RGB numpy output (`tools/bench_render.py`):
 
 ## Editing: page content, redaction, text insertion
 
-These are PyMuPDF-style methods (`pip install "pdfwords[edit]"`). They use the same
+These are PyMuPDF-style methods (`pip install "pdfwords[edit]"` / `uv add "pdfwords[edit]"`). They use the same
 coordinates as `get_text()`: top-left origin, unrotated page.
 
 ```python
@@ -363,11 +401,16 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the architecture.
 ## Development
 
 ```bash
+# with uv: one command builds the Rust extension (editable) and installs the test deps
+uv sync --extra test
+uv run python tools/fetch_test_pdfs.py        # optional: download public test PDFs
+uv run pytest                                 # both backends + parity + accuracy
+
+# or with pip
 python -m venv .venv && . .venv/bin/activate
 pip install maturin pytest numpy pymupdf      # pymupdf: optional, accuracy tests only
 maturin develop --release                     # builds the Rust extension into python/pdfwords
-python tools/fetch_test_pdfs.py               # optional: download public test PDFs
-pytest                                        # both backends + parity + accuracy
+pytest
 cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check
 ```
 

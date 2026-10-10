@@ -17,6 +17,20 @@ Thanks for your interest! Issues and pull requests are welcome.
 
 ## Setup
 
+With [uv](https://docs.astral.sh/uv/) (recommended):
+
+```bash
+uv sync --extra test                         # .venv + editable build of the Rust extension (maturin)
+uv pip install pymupdf pdftext               # optional: accuracy tests, benchmarks
+uv run python tools/fetch_test_pdfs.py       # optional: public test PDFs
+uv run pytest
+```
+
+After changing Rust code, run `uv sync --reinstall-package pdfwords` or
+`uv run maturin develop --release` to rebuild. `uv.lock` is not committed (this is a library).
+
+With pip:
+
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install maturin pytest numpy

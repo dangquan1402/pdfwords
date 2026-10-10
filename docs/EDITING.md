@@ -1,6 +1,6 @@
 # Editing: content streams, redaction, text insertion
 
-Install: `pip install "pdfwords[edit]"`. This pulls in pypdf (BSD-3-Clause), fontTools (MIT)
+Install: `pip install "pdfwords[edit]"` or `uv add "pdfwords[edit]"`. This pulls in pypdf (BSD-3-Clause), fontTools (MIT)
 and Pillow (MIT-CMU). The design follows PyMuPDF's *public* API documentation and observable
 behaviour. No MuPDF or PyMuPDF source was used.
 
