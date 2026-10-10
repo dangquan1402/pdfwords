@@ -1,0 +1,74 @@
+site_name: pdfwords
+site_description: PDF text extraction with char/word/line/block bounding boxes on PDFium (PyMuPDF-compatible output, Apache-2.0)
+site_url: https://pdfwords.readthedocs.io/
+repo_url: https://github.com/dangquan1402/pdfwords
+repo_name: dangquan1402/pdfwords
+edit_uri: edit/main/docs/
+copyright: Apache-2.0 &middot; Quan Dang
+
+docs_dir: docs
+exclude_docs: |
+  requirements.txt
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - content.code.copy
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle: {icon: material/brightness-7, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle: {icon: material/brightness-4, name: Light mode}
+
+hooks:
+  - tools/mkdocs_hooks.py
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [python]
+          options:
+            docstring_style: null
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            members_order: source
+            filters: ["!^_"]
+            heading_level: 3
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Guides:
+      - Editing and redaction: EDITING.md
+      - Migrating from pdftext: PDFTEXT.md
+      - LLM-ready output: LLM.md
+      - Tables: TABLES.md
+      - OCR fallback: OCR.md
+      - Rendering: RENDERING.md
+  - Benchmarks: BENCHMARKS.md
+  - Internals:
+      - Design: DESIGN.md
+      - Thresholds: THRESHOLDS.md
+      - WebAssembly spike: WASM.md
+  - API reference: api.md
+  - Changelog: changelog.md

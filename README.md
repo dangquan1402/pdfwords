@@ -1,6 +1,7 @@
 # pdfwords
 
 [![CI](https://github.com/dangquan1402/pdfwords/actions/workflows/ci.yml/badge.svg)](https://github.com/dangquan1402/pdfwords/actions/workflows/ci.yml)
+[![Documentation](https://readthedocs.org/projects/pdfwords/badge/?version=latest)](https://pdfwords.readthedocs.io/en/latest/)
 [![PyPI](https://img.shields.io/pypi/v/pdfwords.svg)](https://pypi.org/project/pdfwords/)
 [![Python versions](https://img.shields.io/pypi/pyversions/pdfwords.svg)](https://pypi.org/project/pdfwords/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -9,6 +10,8 @@
 PyMuPDF's `page.get_text()`, it is built on [PDFium](https://pdfium.googlesource.com/pdfium/)
 through [pypdfium2](https://github.com/pypdfium2-team/pypdfium2), and it is licensed
 **Apache-2.0**. An optional Rust core makes it about as fast as PyMuPDF.
+
+Documentation: **https://pdfwords.readthedocs.io** (guides plus the API reference).
 
 ![W-9 page with word (blue) and block (red, numbered in reading order) boxes](docs/overlay_w9.png)
 
@@ -26,7 +29,7 @@ conventions:
 
 ## Install
 
-Prebuilt abi3 wheels (one per platform, any CPython ≥ 3.9) cover:
+Prebuilt abi3 wheels on [PyPI](https://pypi.org/project/pdfwords/) (one per platform, any CPython ≥ 3.9) cover:
 
 * Linux x86_64 and aarch64 (manylinux 2.28);
 * macOS x86_64 and arm64;
@@ -46,12 +49,10 @@ uvx pdfwords file.pdf --mode text    # one-off CLI run, no install (uv tool run)
 uv tool install pdfwords             # or keep the `pdfwords` command on PATH
 ```
 
-> **PyPI status:** the first PyPI release (0.4.0) is waiting on the trusted-publisher setup.
-> Until it appears on PyPI, install the tagged release from GitHub. This builds the Rust
-> extension, so it needs a Rust toolchain:
-> `pip install "pdfwords @ git+https://github.com/dangquan1402/pdfwords@v0.4.0"`,
-> `uv add "pdfwords @ git+https://github.com/dangquan1402/pdfwords@v0.4.0"` or
-> `uvx --from git+https://github.com/dangquan1402/pdfwords@v0.4.0 pdfwords --help`.
+Install the development version from GitHub (this builds the Rust extension, so it needs
+a Rust toolchain):
+`uv add "pdfwords @ git+https://github.com/dangquan1402/pdfwords"` or
+`pip install "pdfwords @ git+https://github.com/dangquan1402/pdfwords"`.
 
 From a checkout (needs a Rust toolchain for the fast backend):
 

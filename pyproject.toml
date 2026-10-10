@@ -52,9 +52,12 @@ arrow = ["pyarrow>=10"]
 # pymupdf (AGPL) is only used by the optional accuracy tests/benchmarks, never at runtime
 test = ["pytest>=7", "numpy", "pypdf>=5.1", "fonttools>=4.40", "pillow>=9"]
 compare = ["pymupdf", "pdftext"]
+# documentation site (mkdocs build --strict); kept in sync with docs/requirements.txt
+docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.26"]
 
 [project.urls]
 Homepage = "https://github.com/dangquan1402/pdfwords"
+Documentation = "https://pdfwords.readthedocs.io"
 Repository = "https://github.com/dangquan1402/pdfwords"
 Issues = "https://github.com/dangquan1402/pdfwords/issues"
 Changelog = "https://github.com/dangquan1402/pdfwords/blob/main/CHANGELOG.md"
