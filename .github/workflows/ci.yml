@@ -95,6 +95,7 @@ jobs:
           python -m pip install pytest numpy pypdfium2 "pypdf>=5.1" "fonttools>=4.40" "pillow>=9"
           python -m pip install pymupdf || echo "::warning::pymupdf unavailable; accuracy tests will be skipped"
           python -m pip install pandas pyarrow || echo "::warning::pandas/pyarrow unavailable; frame tests will be skipped"
+          python -m pip install pikepdf mozjpeg-lossless-optimization || echo "::warning::pikepdf unavailable; shrink tests will be skipped"
       - name: Tests - pure-Python fallback (extension absent)
         env:
           PYTHONPATH: python
@@ -133,6 +134,11 @@ jobs:
           pdfwords tables tests/fixtures/irs_w9.pdf --pages 0 -f md > tables.md
           pdfwords frame tests/fixtures/simple_text.pdf -o words.csv --kind words
           grep -q "^page,block,line,word" words.csv
+          if python -c "import pikepdf" 2>/dev/null; then
+            pdfwords shrink tests/fixtures/irs_w9.pdf -o w9_small.pdf --preset balanced --report shrink.json
+            python -c "import json; r = json.load(open('shrink.json')); assert r['bytes_after'] < r['bytes_before'], r"
+            pdfwords w9_small.pdf --mode text --pages 0 | grep -q "Request for Taxpayer"
+          fi
       - name: OCR engines (Tesseract via pytesseract, RapidOCR)
         if: matrix.os == 'ubuntu-24.04' && matrix.python == '3.12'
         run: |
@@ -145,6 +151,13 @@ jobs:
           print("engines:", available_engines())
           assert "tesseract" in available_engines()
           PY
+      - name: Shrink with jbig2enc + qpdf CLI (apt)
+        if: matrix.os == 'ubuntu-24.04' && matrix.python == '3.12'
+        run: |
+          sudo apt-get install -y -q jbig2 qpdf || echo "::warning::jbig2/qpdf unavailable"
+          python -m pip install scikit-image || echo "::warning::scikit-image unavailable (SSIM cross-check skipped)"
+          python -c "from pdfwords.shrink import available_codecs as a; print(a()); assert a()['jbig2']"
+          python -m pytest -q -ra tests/test_shrink.py
       - name: LLM integrations (LangChain, LlamaIndex, MCP)
         if: matrix.os == 'ubuntu-24.04' && matrix.python == '3.12'
         run: |

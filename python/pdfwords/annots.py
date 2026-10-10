@@ -305,6 +305,8 @@ def widgets(page, rotated=False):
     """Form fields on the page: annots(types={"Widget"}) plus field name/type/value/checked/choices."""
     doc = page.parent
     fdoc = doc._forms_pdf()
+    if fdoc.formenv is None:      # no AcroForm (pypdfium2 creates no form environment)
+        return []
     p = fdoc[page.number]
     try:
         return annots(page, types={"Widget"}, rotated=rotated, _pdfpage=p, _form=fdoc.formenv.raw)

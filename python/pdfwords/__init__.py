@@ -30,7 +30,7 @@ from .annots import LINK_NONE, LINK_GOTO, LINK_URI, LINK_LAUNCH, LINK_NAMED, LIN
 
 __version__ = "0.4.1"
 __all__ = ["open", "Document", "Page", "available_backends", "default_backend", "parallel_words", "__version__",
-           "extract", "iter_pages", "RenderTimeout", "Pixmap", "convert_from_path", "convert_from_bytes", "to_markdown", "chunks", "export", "LINK_NONE", "LINK_GOTO", "LINK_URI", "LINK_LAUNCH", "LINK_NAMED", "LINK_GOTOR",
+           "extract", "iter_pages", "RenderTimeout", "Pixmap", "convert_from_path", "convert_from_bytes", "to_markdown", "chunks", "export", "optimize", "LINK_NONE", "LINK_GOTO", "LINK_URI", "LINK_LAUNCH", "LINK_NAMED", "LINK_GOTOR",
            "PDF_REDACT_IMAGE_NONE", "PDF_REDACT_IMAGE_REMOVE", "PDF_REDACT_IMAGE_PIXELS",
            "PDF_REDACT_LINE_ART_NONE", "PDF_REDACT_LINE_ART_REMOVE_IF_COVERED", "PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED",
            "PDF_REDACT_TEXT_REMOVE", "PDF_REDACT_TEXT_NONE"]
@@ -198,6 +198,16 @@ class Document:
 
     def tobytes(self, garbage=0, deflate=False, incremental=False, **_ignored):
         return self._editor().to_bytes(incremental=incremental, garbage=garbage, deflate=deflate)
+
+    def optimize(self, output=None, preset="balanced", **kw):
+        """Shrink the document (as it is now, edits included) while keeping text, vectors, links,
+        annotations, forms, outlines and tags; only images are re-encoded. Writes `output` (path) if
+        given and returns a pdfwords.shrink.OptimizeReport whose .data holds the bytes. Never larger
+        than the input. Options: see pdfwords.optimize. Needs pip install "pdfwords[shrink]"."""
+        from .shrink import optimize
+        src = self._current_source()
+        password = self._password if self._gen == 0 else None
+        return optimize(src, output, preset, password=password, **kw)
 
     write = tobytes
 
@@ -1239,6 +1249,15 @@ def export(source, fmt="markdown", pages=None, **kw):
     """Whole-document export: markdown | html | xhtml | xml | hocr | alto (see pdfwords.exporters)."""
     from .exporters import export as f
     return f(source, fmt, pages, **kw)
+
+
+def optimize(source, output=None, preset="balanced", **kw):
+    """Structure-preserving size optimisation of a path / bytes / file object (see
+    pdfwords.shrink.optimize for all options): presets "lossless" | "balanced" | "max", target_dpi,
+    jpeg_quality, grayscale, mrc, ocr, strip_metadata, remove_thumbnails, dedupe, min_ssim,
+    max_raster_fallback, progress. Returns an OptimizeReport. Needs pip install "pdfwords[shrink]"."""
+    from .shrink import optimize as f
+    return f(source, output, preset, **kw)
 
 
 def convert_from_path(pdf_path, dpi=200, **kw):

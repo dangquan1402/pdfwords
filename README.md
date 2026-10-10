@@ -78,6 +78,7 @@ The only runtime dependency is `pypdfium2`. The optional extras are:
 | `llamaindex` | llama-index-core | MIT |
 | `mcp` | the MCP SDK (Python ≥ 3.10) | MIT |
 | `numpy` | numpy, for `Page.words_array()` | BSD |
+| `shrink` | `pdfwords.optimize` / `pdfwords shrink`: pikepdf, Pillow, numpy, mozjpeg-lossless-optimization | MPL-2.0 (pikepdf, used unmodified) / MIT-CMU / BSD |
 
 Install any of them the same way: `pip install "pdfwords[tables,arrow]"` or
 `uv add "pdfwords[tables,arrow]"`.
@@ -232,6 +233,37 @@ ms/page, whole documents, RGB numpy output (`tools/bench_render.py`):
 * pdfwords is 3–6× faster than pdf2image and level with PyMuPDF at ≤ 150 dpi.
 * SSIM against PyMuPDF is 0.97–0.99.
 
+## Shrinking PDFs (structure-preserving)
+
+`pip install "pdfwords[shrink]"` / `uv add "pdfwords[shrink]"`. It makes files smaller without
+rasterising them. Text, vector graphics, fonts, links, annotations, form fields, outlines and
+tags stay as they are. Only images are re-encoded:
+
+* resampled to a target DPI based on the size they are drawn at;
+* JPEG (with an SSIM floor per image), and gray when an image is effectively gray;
+* CCITT G4, or JBIG2 when `jbig2enc` is installed, for 1-bit images;
+* MRC (a 1-bit text mask plus a low-resolution background) for scanned pages.
+
+The optimiser also merges duplicate streams, drops thumbnails and re-writes the file with
+object streams. The output is never larger than the input.
+
+```python
+import pdfwords
+
+rep = pdfwords.optimize("in.pdf", "out.pdf", preset="balanced")   # "lossless" | "balanced" | "max"
+print(rep.bytes_before, rep.bytes_after, f"{rep.reduction:.0%}", rep.kept_original)
+rep = pdfwords.open("scan.pdf").optimize("small.pdf", preset="max", ocr=True)  # + searchable text layer
+```
+
+```bash
+pdfwords shrink in.pdf -o out.pdf --preset balanced --report report.json
+```
+
+On the internal benchmark corpus, `balanced` saves 95–99 % on scans, photos and image-heavy
+reports, and 17–62 % on born-digital PDFs. Word recall is 100 % and mean render SSIM is
+≥ 0.94.
+See [docs/SHRINK.md](docs/SHRINK.md) for the presets, what is kept and the numbers.
+
 ## Editing: page content, redaction, text insertion
 
 These are PyMuPDF-style methods (`pip install "pdfwords[edit]"` / `uv add "pdfwords[edit]"`). They use the same
@@ -305,6 +337,7 @@ pdfwords mcp --root ~/Documents                      # MCP server (stdio)
 pdfwords tables file.pdf --pages 3 -f md             # json | markdown | csv (-o dir/)
 pdfwords frame file.pdf -o words.parquet --kind words   # or chars|spans|lines|blocks, or -o x.csv
 pdfwords scan.pdf --mode text --ocr auto --ocr-engine tesseract --ocr-lang eng
+pdfwords shrink in.pdf -o out.pdf --preset balanced [--ocr] [--report report.json]   # pdfwords[shrink]
 ```
 
 ## Backends
@@ -383,6 +416,10 @@ superscript detection are all 1.0, and block agreement is 0.996. See
   (`workers=` on `doc.extract()` / `iter_pages()`).
 * **Base-14 metrics.** Boxes of non-embedded base-14 fonts follow PDFium's substitute metrics,
   which differ slightly from PyMuPDF's.
+* **Shrinking** never rasterises text pages in `lossless` / `balanced`. It leaves CMYK, indexed,
+  16-bit and JPEG 2000 images as they are. Signed and encrypted PDFs are returned unchanged. MRC
+  takes about 2 s per 300 dpi page in Python. Fonts are only deduplicated: there is no Type 1 to
+  CFF conversion or re-subsetting yet. See [docs/SHRINK.md](docs/SHRINK.md#limits).
 * **Editing** has no text shaping: complex scripts that need GSUB/GPOS shaping (Arabic,
   Devanagari, ...) are not supported. Precomposed Latin, including Vietnamese, works. For other
   redaction limits see [docs/EDITING.md](docs/EDITING.md#limits).

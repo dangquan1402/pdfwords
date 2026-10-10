@@ -65,6 +65,7 @@ nav:
       - Tables: TABLES.md
       - OCR fallback: OCR.md
       - Rendering: RENDERING.md
+      - Shrinking PDFs: SHRINK.md
   - Benchmarks: BENCHMARKS.md
   - Internals:
       - Design: DESIGN.md
