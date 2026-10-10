@@ -29,7 +29,7 @@ conventions:
 
 ## Install
 
-Prebuilt abi3 wheels (one per platform, any CPython ≥ 3.9) cover:
+Prebuilt abi3 wheels on [PyPI](https://pypi.org/project/pdfwords/) (one per platform, any CPython ≥ 3.9) cover:
 
 * Linux x86_64 and aarch64 (manylinux 2.28);
 * macOS x86_64 and arm64;
@@ -49,12 +49,10 @@ uvx pdfwords file.pdf --mode text    # one-off CLI run, no install (uv tool run)
 uv tool install pdfwords             # or keep the `pdfwords` command on PATH
 ```
 
-> **PyPI status:** the first PyPI release (0.4.0) is waiting on the trusted-publisher setup.
-> Until it appears on PyPI, install the tagged release from GitHub. This builds the Rust
-> extension, so it needs a Rust toolchain:
-> `pip install "pdfwords @ git+https://github.com/dangquan1402/pdfwords@v0.4.0"`,
-> `uv add "pdfwords @ git+https://github.com/dangquan1402/pdfwords@v0.4.0"` or
-> `uvx --from git+https://github.com/dangquan1402/pdfwords@v0.4.0 pdfwords --help`.
+Install the development version from GitHub (this builds the Rust extension, so it needs
+a Rust toolchain):
+`uv add "pdfwords @ git+https://github.com/dangquan1402/pdfwords"` or
+`pip install "pdfwords @ git+https://github.com/dangquan1402/pdfwords"`.
 
 From a checkout (needs a Rust toolchain for the fast backend):
 
