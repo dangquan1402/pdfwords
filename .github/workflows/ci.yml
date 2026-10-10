@@ -37,6 +37,17 @@ jobs:
           export PDFWORDS_PDFIUM_LIB="$(python -c 'import os, pypdfium2_raw; print(os.path.join(os.path.dirname(pypdfium2_raw.__file__), "libpdfium.so"))')"
           cargo test --workspace
 
+  docs:
+    name: Docs (mkdocs build --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r docs/requirements.txt
+      - run: mkdocs build --strict
+
   uv:
     name: uv (sync, run, uvx)
     runs-on: ubuntu-latest

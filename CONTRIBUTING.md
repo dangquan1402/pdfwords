@@ -68,3 +68,17 @@ docs/                   design notes, threshold derivation, images
    `CHANGELOG.md`.
 2. Tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` builds the wheels and sdist,
    and publishes to PyPI with trusted publishing.
+
+## Documentation
+
+The site is built with MkDocs Material, and mkdocstrings generates the API reference from the
+docstrings. Read the Docs builds it from `.readthedocs.yaml`. Preview locally:
+
+```bash
+uv run --with-requirements docs/requirements.txt mkdocs serve      # or: pip install -r docs/requirements.txt
+uv run --with-requirements docs/requirements.txt mkdocs build --strict   # what CI and Read the Docs run
+```
+
+The home page, quickstart and changelog are generated from `README.md` and `CHANGELOG.md` by
+`tools/mkdocs_hooks.py`. Edit those files, not copies.
+

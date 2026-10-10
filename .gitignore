@@ -22,3 +22,4 @@ out/
 *.part
 .DS_Store
 uv.lock
+site/

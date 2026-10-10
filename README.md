@@ -1,6 +1,7 @@
 # pdfwords
 
 [![CI](https://github.com/dangquan1402/pdfwords/actions/workflows/ci.yml/badge.svg)](https://github.com/dangquan1402/pdfwords/actions/workflows/ci.yml)
+[![Documentation](https://readthedocs.org/projects/pdfwords/badge/?version=latest)](https://pdfwords.readthedocs.io/en/latest/)
 [![PyPI](https://img.shields.io/pypi/v/pdfwords.svg)](https://pypi.org/project/pdfwords/)
 [![Python versions](https://img.shields.io/pypi/pyversions/pdfwords.svg)](https://pypi.org/project/pdfwords/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -9,6 +10,8 @@
 PyMuPDF's `page.get_text()`, it is built on [PDFium](https://pdfium.googlesource.com/pdfium/)
 through [pypdfium2](https://github.com/pypdfium2-team/pypdfium2), and it is licensed
 **Apache-2.0**. An optional Rust core makes it about as fast as PyMuPDF.
+
+Documentation: **https://pdfwords.readthedocs.io** (guides plus the API reference).
 
 ![W-9 page with word (blue) and block (red, numbered in reading order) boxes](docs/overlay_w9.png)
 
