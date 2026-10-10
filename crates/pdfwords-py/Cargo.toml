@@ -14,7 +14,7 @@ name = "_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-pdfwords-core = { path = "../pdfwords-core", version = "0.4.1" }
+pdfwords-core = { path = "../pdfwords-core", version = "0.5.0" }
 pyo3 = { version = "0.25", features = ["abi3-py39"] }
 
 [features]
