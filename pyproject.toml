@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pdfwords"
-version = "0.4.1"
+version = "0.5.0"
 description = "PyMuPDF-compatible text extraction with char/word/line/block bounding boxes, built on PDFium. Apache-2.0, optional Rust core."
 readme = "README.md"
 license = { text = "Apache-2.0" }

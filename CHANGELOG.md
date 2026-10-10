@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Planned as 0.5.0.
+## [0.5.0] - 2026-10-10
 
 ### Added
 - **Structure-preserving PDF shrinking:** `pdfwords.optimize(src, out, preset=...)`,
@@ -293,6 +293,9 @@ Documentation and packaging release. The library code is unchanged from 0.4.0.
   PyMuPDF (optional).
 - The `pdfwords` CLI.
 
-[Unreleased]: https://github.com/dangquan1402/pdfwords/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/dangquan1402/pdfwords/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/dangquan1402/pdfwords/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/dangquan1402/pdfwords/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/dangquan1402/pdfwords/releases/tag/v0.4.0
 [0.2.0]: https://github.com/dangquan1402/pdfwords/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dangquan1402/pdfwords/releases/tag/v0.1.0
